@@ -16,54 +16,16 @@
     </div>
 </div>
 
-<div class="video-grid">
-    {% for video in videos %}
-    <a href="/video/{{ video.id }}" class="video-card">
-        <div class="card-thumb">
-            {% if video.thumbnail_path %}
-            <img src="/thumbnail/{{ video.file_hash }}" alt="{{ video.file_name }}" loading="lazy">
-            {% else %}
-            <div class="no-thumb">No Preview</div>
-            {% endif %}
-            {% if video.duration_seconds %}
-            <span class="card-duration">{{ video.duration_seconds | duration }}</span>
-            {% endif %}
-            {% if video.source_device %}
-            <span class="card-device">{{ video.source_device }}</span>
-            {% endif %}
-        </div>
-        <div class="card-info">
-            <div class="card-filename">{{ video.file_name }}</div>
-            {% if video.scene_description and not video.scene_description.startswith("ERROR") %}
-            <div class="card-desc">{{ video.scene_description[:100] }}</div>
-            {% endif %}
-            {% if video.tags %}
-            <div class="card-tags">
-                {% for tag in video.tags | parse_tags %}
-                {% if loop.index <= 4 %}
-                <span class="tag">{{ tag }}</span>
-                {% endif %}
-                {% endfor %}
-            </div>
-            {% endif %}
-            <div class="card-meta">
-                {% if video.resolution %}{{ video.resolution }}{% endif %}
-                {% if video.gps_location_name %} | {{ video.gps_location_name }}{% endif %}
-            </div>
-        </div>
-    </a>
-    {% endfor %}
-</div>
+    <div id="breadcrumbs" class="breadcrumbs"></div>
 
-{% if total_pages > 1 %}
-<div class="pagination">
-    {% if page > 1 %}
-    <a href="/?page={{ page - 1 }}">&laquo; Prev</a>
-    {% endif %}
-    <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
-    {% if page < total_pages %}
-    <a href="/?page={{ page + 1 }}">Next &raquo;</a>
-    {% endif %}
-</div>
-{% endif %}
+    <div id="folder-grid" class="folder-grid"></div>
+
+    <div id="video-grid" class="video-grid"></div>
+    
+    <div id="loader" class="loader">Loading...</div>
+    <div id="sentinel" class="sentinel"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/browse.js"></script>
 {% endblock %}

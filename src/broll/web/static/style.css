@@ -60,6 +60,86 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
 /* ── Browse ── */
 .browse-header { margin-bottom: 1.5rem; }
 
+.breadcrumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    font-size: 1rem;
+    color: var(--text-muted);
+}
+
+.breadcrumbs a {
+    color: var(--text);
+    text-decoration: none;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    transition: all 0.15s;
+}
+
+.breadcrumbs a:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.breadcrumbs .separator {
+    color: var(--text-dim);
+}
+
+/* ── Folder Grid ── */
+.folder-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.folder-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+}
+
+.folder-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    background: var(--bg-hover);
+}
+
+.folder-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+    opacity: 0.8;
+}
+
+.folder-name {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text);
+    word-break: break-word;
+}
+
+.loader {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+    font-style: italic;
+    display: none;
+}
+
+.sentinel { height: 2px; }
+
 .search-form {
     display: flex;
     gap: 0.5rem;

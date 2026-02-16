@@ -4,6 +4,7 @@ Database layer — SQLite with FTS5 (keyword search) + sqlite-vec (semantic sear
 
 The database file lives on the external SSD so everything is portable.
 """
+
 from __future__ import annotations
 
 import json
@@ -195,17 +196,13 @@ class Database:
     def get_video_by_path(self, file_path: str) -> dict[str, Any] | None:
         """Fetch a single video record by its relative path."""
         conn = self.connect()
-        row = conn.execute(
-            "SELECT * FROM videos WHERE file_path = ?", (file_path,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM videos WHERE file_path = ?", (file_path,)).fetchone()
         return dict(row) if row else None
 
     def get_video_by_id(self, video_id: int) -> dict[str, Any] | None:
         """Fetch a single video record by its ID."""
         conn = self.connect()
-        row = conn.execute(
-            "SELECT * FROM videos WHERE id = ?", (video_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
         return dict(row) if row else None
 
     def get_all_videos(
@@ -215,10 +212,14 @@ class Database:
         conn = self.connect()
         # Whitelist allowed order_by values to prevent SQL injection
         allowed_orders = {
-            "creation_date DESC", "creation_date ASC",
-            "file_name ASC", "file_name DESC",
-            "duration_seconds DESC", "duration_seconds ASC",
-            "processed_at DESC", "processed_at ASC",
+            "creation_date DESC",
+            "creation_date ASC",
+            "file_name ASC",
+            "file_name DESC",
+            "duration_seconds DESC",
+            "duration_seconds ASC",
+            "processed_at DESC",
+            "processed_at ASC",
         }
         if order_by not in allowed_orders:
             order_by = "creation_date DESC"
@@ -229,13 +230,107 @@ class Database:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_folder_contents(
+        self, folder_path: str = ".", limit: int = 100, offset: int = 0
+    ) -> dict[str, Any]:
+        """
+        Get contents of a specific folder: subdirectories and videos.
+        folder_path: relative path from drive root (e.g. "2023/Trip"). Use "." for root.
+        """
+        conn = self.connect()
+
+        # Normalize path
+        if folder_path == ".":
+            folder_path = ""
+
+        # 1. Get subdirectories
+        # We look for files that start with the folder_path + "/"
+        # and extract the immediate next directory component.
+
+        # SQL logic:
+        # - Find paths starting with folder_path/ (or just anything for root)
+        # - substr(...) logic is complex in pure SQL without a custom function usually,
+        #   but we can try a glob match and distinct extraction.
+
+        # Actually, it's easier to do a somewhat broader query or use specific logic.
+        # Given SQLite limitations, let's do:
+        # SELECT DISTINCT file_path FROM videos WHERE file_path GLOB 'folder_path/*'
+
+        glob_pattern = f"{folder_path}/*" if folder_path else "*"
+        prefix_len = len(folder_path) + 1 if folder_path else 0
+
+        # Getting all paths might be heavy if there are thousands.
+        # But we only need immediate subdirs.
+        # Optimization: We can maintain a separate folders table, but we don't have one.
+        # Let's try to do it with string manipulation in python for now if the dataset isn't huge,
+        # OR use a recursive CTE or just smart grouping.
+
+        # Better approach for now:
+        # SELECT file_path FROM videos WHERE file_path LIKE ?
+        # And process in python to find unique immediate subdirs.
+        # For a few thousand videos this is fine. For millions, we'd need a different schema.
+
+        like_pattern = f"{folder_path}/%" if folder_path else "%"
+
+        # We only need paths that match the immediate level.
+        # This query might still be expensive if we select ALL.
+        # Let's try to limit scanning.
+
+        cursor = conn.execute(
+            "SELECT file_path FROM videos WHERE file_path LIKE ?", (like_pattern,)
+        )
+
+        subfolders = set()
+
+        for row in cursor:
+            path = row[0]
+            # Strip the prefix
+            if prefix_len > 0:
+                rel_path = path[prefix_len:]
+            else:
+                rel_path = path
+
+            if "/" in rel_path:
+                # It has a subdirectory
+                subdir = rel_path.split("/", 1)[0]
+                subfolders.add(subdir)
+
+        sorted_folders = sorted(list(subfolders))
+
+        # 2. Get videos directly in this folder (no subfolders)
+        # We want file_path NOT LIKE 'folder_path/%/%' essentially.
+        # i.e. it shouldn't have another slash after the prefix.
+
+        # SQLite GLOB is case sensitive, LIKE is case insensitive (usually). Paths are case sensitive?
+        # Let's stick to standard logic.
+
+        # Construct a query to find videos in this folder ONLY.
+        # We can filter in Python or try to be clever with SQL.
+        # SQL: ... AND file_path NOT LIKE ?
+
+        exclude_pattern = f"{folder_path}/%/%" if folder_path else "%/%"
+
+        videos_query = """
+            SELECT * FROM videos 
+            WHERE file_path LIKE ? 
+            AND file_path NOT LIKE ?
+            ORDER BY creation_date DESC 
+            LIMIT ? OFFSET ?
+        """
+
+        video_rows = conn.execute(
+            videos_query, (like_pattern, exclude_pattern, limit, offset)
+        ).fetchall()
+
+        videos = [dict(row) for row in video_rows]
+
+        return {"folders": sorted_folders, "videos": videos}
+
     def get_stats(self) -> dict[str, Any]:
         """Return summary statistics about the catalog."""
         conn = self.connect()
         stats = {}
-        stats["total_videos"] = conn.execute(
-            "SELECT COUNT(*) FROM videos"
-        ).fetchone()[0]
+        stats["total_videos"] = conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
         stats["total_duration_seconds"] = conn.execute(
             "SELECT COALESCE(SUM(duration_seconds), 0) FROM videos"
         ).fetchone()[0]
@@ -243,7 +338,8 @@ class Database:
             "SELECT COALESCE(SUM(file_size), 0) FROM videos"
         ).fetchone()[0]
         stats["devices"] = [
-            row[0] for row in conn.execute(
+            row[0]
+            for row in conn.execute(
                 "SELECT DISTINCT source_device FROM videos WHERE source_device IS NOT NULL"
             ).fetchall()
         ]
@@ -387,9 +483,7 @@ class Database:
         ).fetchall()
         return [(row[0], row[1]) for row in rows]
 
-    def vector_search(
-        self, embedding: list[float], limit: int = 20
-    ) -> list[tuple[int, float]]:
+    def vector_search(self, embedding: list[float], limit: int = 20) -> list[tuple[int, float]]:
         """Semantic vector search via sqlite-vec. Returns [(video_id, distance), ...]."""
         conn = self.connect()
         embedding_bytes = struct.pack(f"{len(embedding)}f", *embedding)
@@ -409,7 +503,7 @@ class Database:
         """Quick count of total videos."""
         conn = self.connect()
         return conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
-    
+
     # ── Search Methods ──
     def search_fts(self, query: str, limit: int = 20) -> list[dict]:
         """
@@ -456,12 +550,12 @@ class Database:
 
     def get_video_by_id(self, video_id: int) -> dict | None:
         """Fetch a single video record by ID."""
-        row = self._conn.execute(
-            "SELECT * FROM videos WHERE id = ?", (video_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
         if not row:
             return None
-        columns = [desc[0] for desc in self._conn.execute("SELECT * FROM videos LIMIT 0").description]
+        columns = [
+            desc[0] for desc in self._conn.execute("SELECT * FROM videos LIMIT 0").description
+        ]
         return dict(zip(columns, row))
 
     def get_videos_by_ids(self, video_ids: list[int]) -> list[dict]:
@@ -471,7 +565,9 @@ class Database:
         placeholders = ",".join("?" for _ in video_ids)
         sql = f"SELECT * FROM videos WHERE id IN ({placeholders})"
         rows = self._conn.execute(sql, video_ids).fetchall()
-        columns = [desc[0] for desc in self._conn.execute("SELECT * FROM videos LIMIT 0").description]
+        columns = [
+            desc[0] for desc in self._conn.execute("SELECT * FROM videos LIMIT 0").description
+        ]
 
         # Build a lookup and return in the original order
         lookup = {}
@@ -484,25 +580,33 @@ class Database:
         """Fetch all videos, most recent first."""
         sql = "SELECT * FROM videos ORDER BY creation_date DESC, id DESC LIMIT ? OFFSET ?"
         rows = self._conn.execute(sql, (limit, offset)).fetchall()
-        columns = [desc[0] for desc in self._conn.execute("SELECT * FROM videos LIMIT 0").description]
+        columns = [
+            desc[0] for desc in self._conn.execute("SELECT * FROM videos LIMIT 0").description
+        ]
         return [dict(zip(columns, row)) for row in rows]
 
     def get_catalog_stats(self) -> dict:
         """Get summary statistics about the catalog."""
         stats = {}
         stats["total_videos"] = self._conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
-        stats["total_with_embeddings"] = self._conn.execute("SELECT COUNT(*) FROM videos_vec").fetchone()[0]
+        stats["total_with_embeddings"] = self._conn.execute(
+            "SELECT COUNT(*) FROM videos_vec"
+        ).fetchone()[0]
 
         row = self._conn.execute("SELECT SUM(file_size) FROM videos").fetchone()
         stats["total_size_bytes"] = row[0] or 0
 
-        row = self._conn.execute("SELECT SUM(duration_seconds) FROM videos WHERE duration_seconds IS NOT NULL").fetchone()
+        row = self._conn.execute(
+            "SELECT SUM(duration_seconds) FROM videos WHERE duration_seconds IS NOT NULL"
+        ).fetchone()
         stats["total_duration_seconds"] = row[0] or 0
 
         row = self._conn.execute("SELECT COUNT(DISTINCT source_device) FROM videos").fetchone()
         stats["device_count"] = row[0] or 0
 
-        row = self._conn.execute("SELECT COUNT(*) FROM videos WHERE gps_latitude IS NOT NULL").fetchone()
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM videos WHERE gps_latitude IS NOT NULL"
+        ).fetchone()
         stats["geotagged_count"] = row[0] or 0
 
         row = self._conn.execute(
@@ -511,4 +615,3 @@ class Database:
         stats["analyzed_count"] = row[0] or 0
 
         return stats
-

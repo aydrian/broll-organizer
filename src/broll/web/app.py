@@ -3,6 +3,7 @@
 Flask web application for browsing, searching, and chatting
 with the b-roll catalog.
 """
+
 from __future__ import annotations
 
 import json
@@ -67,10 +68,10 @@ def create_app(drive_path: str) -> Flask:
     def filesize_filter(size_bytes):
         if not size_bytes:
             return "?"
-        gb = size_bytes / (1024 ** 3)
+        gb = size_bytes / (1024**3)
         if gb >= 1:
             return f"{gb:.1f} GB"
-        mb = size_bytes / (1024 ** 2)
+        mb = size_bytes / (1024**2)
         return f"{mb:.0f} MB"
 
     # ── Database helper ──
@@ -91,21 +92,44 @@ def create_app(drive_path: str) -> Flask:
 
     @app.route("/")
     def browse():
-        page = request.args.get("page", 1, type=int)
-        per_page = 24
-        offset = (page - 1) * per_page
-
+        """Render the browse page shell."""
+        # We pass initial stats but no videos, as the frontend will fetch them.
         db = get_db()
-        videos = db.get_all_videos(limit=per_page, offset=offset)
         stats = db.get_catalog_stats()
-        total_pages = max(1, (stats["total_videos"] + per_page - 1) // per_page)
 
+        # Check if there's a specific video to highlight/scroll to (optional, but good for deep linking)
+        # For now, just render the shell.
         return render_template(
             "browse.html",
-            videos=videos,
             stats=stats,
-            page=page,
-            total_pages=total_pages,
+        )
+
+    @app.route("/api/browse")
+    def api_browse():
+        """JSON API for browsing folders and videos."""
+        path = request.args.get("path", "")
+        page = request.args.get("page", 1, type=int)
+        limit = request.args.get("limit", 24, type=int)
+
+        offset = (page - 1) * limit
+        db = get_db()
+
+        # Use our new folder-aware query
+        contents = db.get_folder_contents(folder_path=path, limit=limit, offset=offset)
+
+        # Calculate pagination for videos only (folders don't paginate currently)
+        # Note: We don't have a cheap "count videos in this folder" query yet.
+        # For infinite scroll, we can just return what we have.
+        # If we return fewer than limit videos, the frontend knows it's the end.
+
+        return jsonify(
+            {
+                "path": path,
+                "folders": contents["folders"],
+                "videos": contents["videos"],
+                "page": page,
+                "has_more": len(contents["videos"]) == limit,
+            }
         )
 
     @app.route("/search")
