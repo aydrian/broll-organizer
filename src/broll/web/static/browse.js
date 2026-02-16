@@ -22,34 +22,47 @@ document.addEventListener('DOMContentLoaded', () => {
     const observer = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && !state.loading && state.hasMore) {
             state.page++;
+            // Update history with new page count so we can restore it
+            const url = new URL(window.location);
+            window.history.replaceState({ path: state.path, page: state.page }, '', url);
             loadContent(false);
         }
     }, { rootMargin: '200px' });
 
     observer.observe(elements.sentinel);
 
+    // Save scroll position before navigating away (any navigation)
+    window.addEventListener('beforeunload', () => {
+        sessionStorage.setItem(`scroll_${state.path || 'root'}`, window.scrollY);
+    });
+
     // History handling
     window.addEventListener('popstate', (e) => {
         if (e.state) {
             state.path = e.state.path || '';
+            state.page = e.state.page || 1;
         } else {
             state.path = new URLSearchParams(window.location.search).get('path') || '';
+            state.page = 1;
         }
-        state.page = 1;
         state.hasMore = true;
-        loadContent(true);
+        loadContent(true, true); // true for reset, true for restore
     });
 
-    async function loadContent(reset = false) {
+    async function loadContent(reset = false, restoring = false) {
         if (state.loading) return;
         state.loading = true;
         elements.loader.style.display = 'block';
 
         try {
+            // If restoring and we have multiple pages, load them all at once
+            const effectiveLimit = (restoring && state.page > 1) ? state.limit * state.page : state.limit;
+            const effectivePage = (restoring && state.page > 1) ? 1 : state.page;
+
             const params = new URLSearchParams({
                 path: state.path,
-                page: state.page,
-                limit: state.limit
+                page: effectivePage,
+                limit: effectiveLimit
             });
 
             const response = await fetch(`/api/browse?${params}`);
@@ -62,6 +75,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             renderVideos(data.videos);
+
+            if (restoring) {
+                // Restore scroll position
+                const savedScroll = sessionStorage.getItem(`scroll_${state.path || 'root'}`);
+                if (savedScroll) {
+                    // Slight delay to ensure layout is done
+                    setTimeout(() => {
+                        window.scrollTo(0, parseInt(savedScroll));
+                        sessionStorage.removeItem(`scroll_${state.path || 'root'}`);
+                    }, 0);
+                }
+            }
 
             state.hasMore = data.has_more;
             if (!state.hasMore) {
@@ -92,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             url.searchParams.delete('path');
         }
-        window.history.pushState({ path }, '', url);
+        window.history.pushState({ path, page: 1 }, '', url);
 
         loadContent(true);
     }
