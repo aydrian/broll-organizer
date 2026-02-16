@@ -37,25 +37,46 @@
             <h3>Technical</h3>
             <table class="detail-table">
                 {% if video.duration_seconds %}
-                <tr><td>Duration</td><td>{{ video.duration_seconds | duration }}</td></tr>
+                <tr>
+                    <td>Duration</td>
+                    <td>{{ video.duration_seconds | duration }}</td>
+                </tr>
                 {% endif %}
                 {% if video.resolution %}
-                <tr><td>Resolution</td><td>{{ video.resolution }}</td></tr>
+                <tr>
+                    <td>Resolution</td>
+                    <td>{{ video.resolution }}</td>
+                </tr>
                 {% endif %}
                 {% if video.fps %}
-                <tr><td>Frame Rate</td><td>{{ video.fps }} fps</td></tr>
+                <tr>
+                    <td>Frame Rate</td>
+                    <td>{{ video.fps }} fps</td>
+                </tr>
                 {% endif %}
                 {% if video.codec %}
-                <tr><td>Codec</td><td>{{ video.codec }}</td></tr>
+                <tr>
+                    <td>Codec</td>
+                    <td>{{ video.codec }}</td>
+                </tr>
                 {% endif %}
                 {% if video.file_size %}
-                <tr><td>File Size</td><td>{{ video.file_size | filesize }}</td></tr>
+                <tr>
+                    <td>File Size</td>
+                    <td>{{ video.file_size | filesize }}</td>
+                </tr>
                 {% endif %}
                 {% if video.source_device %}
-                <tr><td>Device</td><td>{{ video.source_device }}</td></tr>
+                <tr>
+                    <td>Device</td>
+                    <td>{{ video.source_device }}</td>
+                </tr>
                 {% endif %}
                 {% if video.creation_date %}
-                <tr><td>Date</td><td>{{ video.creation_date }}</td></tr>
+                <tr>
+                    <td>Date</td>
+                    <td>{{ video.creation_date }}</td>
+                </tr>
                 {% endif %}
             </table>
         </div>
@@ -64,31 +85,160 @@
             <h3>Analysis</h3>
             <table class="detail-table">
                 {% if video.mood and video.mood != 'unknown' %}
-                <tr><td>Mood</td><td>{{ video.mood }}</td></tr>
+                <tr>
+                    <td>Mood</td>
+                    <td>{{ video.mood }}</td>
+                </tr>
                 {% endif %}
                 {% if video.camera_movement and video.camera_movement != 'unknown' %}
-                <tr><td>Camera</td><td>{{ video.camera_movement }}</td></tr>
+                <tr>
+                    <td>Camera</td>
+                    <td>{{ video.camera_movement }}</td>
+                </tr>
                 {% endif %}
                 {% if video.time_of_day and video.time_of_day != 'unknown' %}
-                <tr><td>Time of Day</td><td>{{ video.time_of_day }}</td></tr>
+                <tr>
+                    <td>Time of Day</td>
+                    <td>{{ video.time_of_day }}</td>
+                </tr>
                 {% endif %}
             </table>
         </div>
 
-        {% if video.gps_latitude and video.gps_longitude %}
         <div class="detail-section">
-            <h3>Location</h3>
+            <h3>
+                Location
+                <button id="edit-location-btn" class="btn-text" title="Edit Location">✎</button>
+            </h3>
+
+            <div id="location-edit-container" style="display: none; margin-bottom: 1rem;">
+                <div class="search-box">
+                    <input type="text" id="location-search-input" placeholder="Search for a location..."
+                        autocomplete="off">
+                </div>
+                <div id="location-results" class="location-results"></div>
+            </div>
+
             {% if video.gps_location_name %}
             <p>{{ video.gps_location_name }}</p>
             {% endif %}
+
+            {% if video.gps_latitude and video.gps_longitude %}
             <p>
                 <a href="https://www.google.com/maps?q={{ video.gps_latitude }},{{ video.gps_longitude }}"
-                   target="_blank" rel="noopener">
-                    View on Google Maps ({{ "%.5f" | format(video.gps_latitude) }}, {{ "%.5f" | format(video.gps_longitude) }})
+                    target="_blank" rel="noopener">
+                    View on Google Maps ({{ "%.5f" | format(video.gps_latitude) }}, {{ "%.5f" |
+                    format(video.gps_longitude) }})
                 </a>
             </p>
+            {% endif %}
         </div>
-        {% endif %}
+
+        <script>
+            document.addEventListener('DOMContentLoaded', () => {
+                const editBtn = document.getElementById('edit-location-btn');
+                const container = document.getElementById('location-edit-container');
+                const input = document.getElementById('location-search-input');
+                const resultsDiv = document.getElementById('location-results');
+                let debounceTimer;
+
+                editBtn.addEventListener('click', () => {
+                    container.style.display = container.style.display === 'none' ? 'block' : 'none';
+                    if (container.style.display === 'block') {
+                        input.focus();
+                    }
+                });
+
+                input.addEventListener('input', (e) => {
+                    clearTimeout(debounceTimer);
+                    const query = e.target.value.trim();
+
+                    if (!query) {
+                        resultsDiv.innerHTML = '';
+                        return;
+                    }
+
+                    debounceTimer = setTimeout(() => {
+                        fetch(`/api/location/search?q=${encodeURIComponent(query)}`)
+                            .then(res => res.json())
+                            .then(data => {
+                                resultsDiv.innerHTML = '';
+                                if (data.error) {
+                                    resultsDiv.innerHTML = `<div class="error">${data.error}</div>`;
+                                    return;
+                                }
+
+                                data.forEach(item => {
+                                    const div = document.createElement('div');
+                                    div.className = 'location-result-item';
+                                    div.textContent = item.name;
+                                    div.addEventListener('click', () => saveLocation(item));
+                                    resultsDiv.appendChild(div);
+                                });
+                            })
+                            .catch(err => {
+                                resultsDiv.innerHTML = '<div class="error">Search failed</div>';
+                            });
+                    }, 500);
+                });
+
+                function saveLocation(item) {
+                    fetch(`/api/video/{{ video.id }}/location`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(item),
+                    })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                window.location.reload();
+                            } else {
+                                alert('Failed to update location');
+                            }
+                        })
+                        .catch(err => alert('Error saving location'));
+                }
+            });
+        </script>
+
+        <style>
+            .btn-text {
+                background: none;
+                border: none;
+                cursor: pointer;
+                font-size: 1rem;
+                color: #666;
+                padding: 0 5px;
+            }
+
+            .btn-text:hover {
+                color: #333;
+            }
+
+            .location-results {
+                margin-top: 5px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+
+            .location-result-item {
+                padding: 8px;
+                cursor: pointer;
+                border-bottom: 1px solid #eee;
+            }
+
+            .location-result-item:last-child {
+                border-bottom: none;
+            }
+
+            .location-result-item:hover {
+                background-color: #f5f5f5;
+            }
+        </style>
     </div>
 </div>
 

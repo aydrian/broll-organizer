@@ -213,6 +213,82 @@ def create_app(drive_path: str) -> Flask:
             conditional=True,
         )
 
+    @app.route("/api/location/search")
+    def search_location():
+        """
+        Search for a location using OpenStreetMap Nominatim API.
+        This provides free geocoding with a generous usage policy.
+        """
+        import urllib.request
+        import urllib.parse
+
+        query = request.args.get("q", "").strip()
+        if not query:
+            return jsonify([])
+
+        # Nominaltim requires a User-Agent identifying the application
+        headers = {"User-Agent": "B-Roll-Organizer/0.1.0"}
+
+        try:
+            # Construct the API URL
+            params = urllib.parse.urlencode(
+                {"q": query, "format": "json", "limit": 5, "addressdetails": 0}
+            )
+            url = f"https://nominatim.openstreetmap.org/search?{params}"
+
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req) as response:
+                if response.status != 200:
+                    return jsonify({"error": "Failed to fetch from Nominatim"}), 502
+
+                data = json.loads(response.read().decode())
+
+                # Format the results for our frontend
+                results = []
+                for item in data:
+                    results.append(
+                        {
+                            "name": item.get("display_name"),
+                            "lat": float(item.get("lat")),
+                            "lon": float(item.get("lon")),
+                            "type": item.get("type", "unknown"),
+                        }
+                    )
+
+                return jsonify(results)
+
+        except Exception as e:
+            current_app.logger.error(f"Geocoding error: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/video/<int:video_id>/location", methods=["POST"])
+    def update_video_location(video_id: int):
+        """Update the location of a video."""
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        lat = data.get("lat")
+        lon = data.get("lon")
+        name = data.get("name")  # Use provided name or reverse geocode later if needed
+
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid coordinates"}), 400
+
+        db = get_db()
+        video = db.get_video_by_id(video_id)
+        if not video:
+            abort(404)
+
+        updates = {"gps_latitude": lat, "gps_longitude": lon, "gps_location_name": name}
+
+        db.update_video(video["file_path"], updates)
+
+        return jsonify({"success": True})
+
     @app.route("/api/stats")
     def api_stats():
         db = get_db()
