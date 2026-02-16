@@ -1,0 +1,25 @@
+<!-- src/broll/web/templates/base.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}B-Roll Catalog{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-brand">B-Roll Catalog</div>
+        <div class="nav-links">
+            <a href="/" class="{% if request.endpoint == 'browse' %}active{% endif %}">Browse</a>
+            <a href="/search" class="{% if request.endpoint == 'search_page' %}active{% endif %}">Search</a>
+            <a href="/chat" class="{% if request.endpoint == 'chat_page' %}active{% endif %}">Chat</a>
+        </div>
+    </nav>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

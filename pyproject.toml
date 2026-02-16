@@ -1,0 +1,35 @@
+[project]
+name = "broll-organizer"
+version = "0.1.0"
+description = "AI-powered b-roll organizer using local LLMs via Ollama"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.1",
+    "ffmpeg-python>=0.2",
+    "flask>=3.1",
+    "ollama>=0.4",
+    "pillow>=11.0",
+    "reverse-geocoder>=1.5",
+    "sqlite-vec>=0.1",
+    "tqdm>=4.67",
+]
+
+[project.scripts]
+broll = "broll.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/broll"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.9",
+]

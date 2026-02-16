@@ -1,0 +1,123 @@
+<!-- src/broll/web/templates/chat.html -->
+{% extends "base.html" %}
+{% block title %}Chat - B-Roll Catalog{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <div class="chat-messages" id="chat-messages">
+        <div class="message assistant">
+            <div class="message-content">
+                Hi! I can help you find clips in your b-roll catalog.
+                Try asking things like:
+                <ul>
+                    <li>"Do I have any sunset footage?"</li>
+                    <li>"Find clips with people walking in a city"</li>
+                    <li>"What nature footage do I have?"</li>
+                    <li>"Show me clips from Tokyo"</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div class="chat-input-area">
+        <form id="chat-form" onsubmit="sendMessage(event)">
+            <input type="text" id="chat-input" placeholder="Ask about your footage..." autocomplete="off">
+            <button type="submit" id="send-btn">Send</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const sendBtn = document.getElementById('send-btn');
+let chatHistory = [];
+
+async function sendMessage(e) {
+    e.preventDefault();
+    const message = chatInput.value.trim();
+    if (!message) return;
+
+    // Add user message to UI
+    appendMessage('user', message);
+    chatInput.value = '';
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Thinking...';
+
+    try {
+        const resp = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                message: message,
+                history: chatHistory
+            })
+        });
+
+        if (!resp.ok) {
+            throw new Error('Chat request failed');
+        }
+
+        const data = await resp.json();
+
+        // Add assistant message
+        appendMessage('assistant', data.response, data.videos);
+
+        // Update history
+        chatHistory.push({role: 'user', content: message});
+        chatHistory.push({role: 'assistant', content: data.response});
+
+    } catch (err) {
+        appendMessage('assistant', 'Sorry, something went wrong: ' + err.message);
+    }
+
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send';
+    chatInput.focus();
+}
+
+function appendMessage(role, content, videos) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message ' + role;
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = content;
+    msgDiv.appendChild(contentDiv);
+
+    // Show referenced videos for assistant messages
+    if (role === 'assistant' && videos && videos.length > 0) {
+        const refDiv = document.createElement('div');
+        refDiv.className = 'referenced-clips';
+        refDiv.innerHTML = '<div class="ref-label">Referenced clips:</div>';
+
+        videos.forEach(function(v) {
+            const chipLink = document.createElement('a');
+            chipLink.href = '/video/' + v.id;
+            chipLink.className = 'ref-chip';
+            chipLink.target = '_blank';
+
+            let chipText = v.file_name;
+            if (v.duration_seconds) {
+                const mins = Math.floor(v.duration_seconds / 60);
+                const secs = Math.floor(v.duration_seconds % 60);
+                chipText += ' (' + mins + ':' + String(secs).padStart(2, '0') + ')';
+            }
+            chipLink.textContent = chipText;
+
+            if (v.scene_description) {
+                chipLink.title = v.scene_description;
+            }
+
+            refDiv.appendChild(chipLink);
+        });
+
+        msgDiv.appendChild(refDiv);
+    }
+
+    chatMessages.appendChild(msgDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+</script>
+{% endblock %}

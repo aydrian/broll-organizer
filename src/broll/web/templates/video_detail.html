@@ -1,0 +1,98 @@
+<!-- src/broll/web/templates/video_detail.html -->
+{% extends "base.html" %}
+{% block title %}{{ video.file_name }} - B-Roll Catalog{% endblock %}
+
+{% block content %}
+<div class="detail-layout">
+    <div class="detail-player">
+        <video controls preload="metadata" playsinline>
+            <source src="/video/stream/{{ video.id }}" type="video/mp4">
+            Your browser does not support video playback.
+        </video>
+    </div>
+
+    <div class="detail-info">
+        <h2>{{ video.file_name }}</h2>
+        <div class="detail-path">{{ video.file_path }}</div>
+
+        {% if video.scene_description and not video.scene_description.startswith("ERROR") %}
+        <div class="detail-section">
+            <h3>Description</h3>
+            <p>{{ video.scene_description }}</p>
+        </div>
+        {% endif %}
+
+        {% if video.tags %}
+        <div class="detail-section">
+            <h3>Tags</h3>
+            <div class="card-tags">
+                {% for tag in video.tags | parse_tags %}
+                <span class="tag">{{ tag }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="detail-section">
+            <h3>Technical</h3>
+            <table class="detail-table">
+                {% if video.duration_seconds %}
+                <tr><td>Duration</td><td>{{ video.duration_seconds | duration }}</td></tr>
+                {% endif %}
+                {% if video.resolution %}
+                <tr><td>Resolution</td><td>{{ video.resolution }}</td></tr>
+                {% endif %}
+                {% if video.fps %}
+                <tr><td>Frame Rate</td><td>{{ video.fps }} fps</td></tr>
+                {% endif %}
+                {% if video.codec %}
+                <tr><td>Codec</td><td>{{ video.codec }}</td></tr>
+                {% endif %}
+                {% if video.file_size %}
+                <tr><td>File Size</td><td>{{ video.file_size | filesize }}</td></tr>
+                {% endif %}
+                {% if video.source_device %}
+                <tr><td>Device</td><td>{{ video.source_device }}</td></tr>
+                {% endif %}
+                {% if video.creation_date %}
+                <tr><td>Date</td><td>{{ video.creation_date }}</td></tr>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="detail-section">
+            <h3>Analysis</h3>
+            <table class="detail-table">
+                {% if video.mood and video.mood != 'unknown' %}
+                <tr><td>Mood</td><td>{{ video.mood }}</td></tr>
+                {% endif %}
+                {% if video.camera_movement and video.camera_movement != 'unknown' %}
+                <tr><td>Camera</td><td>{{ video.camera_movement }}</td></tr>
+                {% endif %}
+                {% if video.time_of_day and video.time_of_day != 'unknown' %}
+                <tr><td>Time of Day</td><td>{{ video.time_of_day }}</td></tr>
+                {% endif %}
+            </table>
+        </div>
+
+        {% if video.gps_latitude and video.gps_longitude %}
+        <div class="detail-section">
+            <h3>Location</h3>
+            {% if video.gps_location_name %}
+            <p>{{ video.gps_location_name }}</p>
+            {% endif %}
+            <p>
+                <a href="https://www.google.com/maps?q={{ video.gps_latitude }},{{ video.gps_longitude }}"
+                   target="_blank" rel="noopener">
+                    View on Google Maps ({{ "%.5f" | format(video.gps_latitude) }}, {{ "%.5f" | format(video.gps_longitude) }})
+                </a>
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="detail-back">
+    <a href="/">&laquo; Back to Browse</a>
+</div>
+{% endblock %}

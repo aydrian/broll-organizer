@@ -1,0 +1,73 @@
+<!-- src/broll/web/templates/search_results.html -->
+{% extends "base.html" %}
+{% block title %}Search - B-Roll Catalog{% endblock %}
+
+{% block content %}
+<div class="search-header">
+    <form action="/search" method="get" class="search-form search-form-large">
+        <input type="text" name="q" value="{{ query }}" placeholder="Search your clips..." autocomplete="off">
+        <select name="mode">
+            <option value="hybrid" {% if mode == 'hybrid' %}selected{% endif %}>Hybrid</option>
+            <option value="keyword" {% if mode == 'keyword' %}selected{% endif %}>Keyword</option>
+            <option value="semantic" {% if mode == 'semantic' %}selected{% endif %}>Semantic</option>
+        </select>
+        <button type="submit">Search</button>
+    </form>
+</div>
+
+{% if query %}
+<div class="results-info">
+    {% if results %}
+    {{ results | length }} result(s) for "{{ query }}" ({{ mode }} mode)
+    {% else %}
+    No results for "{{ query }}". Try different terms or switch search mode.
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="results-list">
+    {% for video in results %}
+    <a href="/video/{{ video.id }}" class="result-card">
+        <div class="result-thumb">
+            {% if video.thumbnail_path %}
+            <img src="/thumbnail/{{ video.file_hash }}" alt="{{ video.file_name }}" loading="lazy">
+            {% else %}
+            <div class="no-thumb-sm">No Preview</div>
+            {% endif %}
+        </div>
+        <div class="result-info">
+            <div class="result-filename">{{ video.file_name }}</div>
+            <div class="result-path">{{ video.file_path }}</div>
+            {% if video.scene_description and not video.scene_description.startswith("ERROR") %}
+            <div class="result-desc">{{ video.scene_description[:250] }}</div>
+            {% endif %}
+            <div class="result-meta">
+                {% if video.duration_seconds %}{{ video.duration_seconds | duration }}{% endif %}
+                {% if video.resolution %} | {{ video.resolution }}{% endif %}
+                {% if video.mood and video.mood != 'unknown' %} | Mood: {{ video.mood }}{% endif %}
+                {% if video.camera_movement and video.camera_movement != 'unknown' %} | {{ video.camera_movement }}{% endif %}
+                {% if video.gps_location_name %} | {{ video.gps_location_name }}{% endif %}
+            </div>
+            {% if video.tags %}
+            <div class="card-tags">
+                {% for tag in video.tags | parse_tags %}
+                {% if loop.index <= 8 %}
+                <span class="tag">{{ tag }}</span>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if video.search_score %}
+            <div class="result-score">
+                Score: {{ "%.4f" | format(video.search_score) }}
+                {% if video.in_fts and video.in_vec %}(keyword + semantic)
+                {% elif video.in_fts %}(keyword)
+                {% elif video.in_vec %}(semantic)
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}
