@@ -320,8 +320,18 @@ def create_app(drive_path: str) -> Flask:
         if not video:
             abort(404)
 
+        file_path = video["file_path"]
+        
+        # Validate file_path to prevent directory traversal
+        if file_path.startswith("..") or file_path.startswith("/"):
+            abort(400)
+        
         drive = Path(current_app.config["DRIVE_PATH"])
-        video_path = drive / video["file_path"]
+        video_path = (drive / file_path).resolve()
+        
+        # Verify resolved path is within drive root
+        if not str(video_path).startswith(str(drive)):
+            abort(400)
 
         if not video_path.exists():
             abort(404)
