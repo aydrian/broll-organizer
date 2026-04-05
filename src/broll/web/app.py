@@ -657,4 +657,643 @@ def create_app(drive_path: str) -> Flask:
     def api_stats():
         return jsonify(get_stats())
 
+    # ═════════════════════════════════════════════════════════════════
+    # Playlist Routes & API
+    # ═════════════════════════════════════════════════════════════════
+
+    def init_playlists_table():
+        """Initialize playlists tables if they don't exist."""
+        conn = get_db_conn()
+        
+        # Main playlists table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS playlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                color TEXT DEFAULT '#3b82f6',
+                created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            )
+        """)
+        
+        # Add color column if it doesn't exist (migration)
+        try:
+            conn.execute("SELECT color FROM playlists LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE playlists ADD COLUMN color TEXT DEFAULT '#3b82f6'")
+        
+        # Playlist items with proper foreign keys and position
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS playlist_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id INTEGER NOT NULL,
+                video_id INTEGER NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                added_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+                FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+                UNIQUE(playlist_id, video_id)
+            )
+        """)
+        
+        # Create indexes for performance
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id 
+            ON playlist_items(playlist_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_playlist_items_video_id 
+            ON playlist_items(video_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_playlist_items_position 
+            ON playlist_items(playlist_id, position)
+        """)
+        
+        # Migrate old playlist_videos table if exists
+        try:
+            conn.execute("SELECT 1 FROM playlist_videos LIMIT 1")
+            # Migration: copy data from old table
+            conn.execute("""
+                INSERT OR IGNORE INTO playlist_items (playlist_id, video_id, position, added_at)
+                SELECT playlist_id, video_id, position, added_at FROM playlist_videos
+            """)
+            conn.execute("DROP TABLE playlist_videos")
+        except sqlite3.OperationalError:
+            pass  # Old table doesn't exist
+            
+        conn.commit()
+
+    @app.route("/playlists")
+    def playlists_page():
+        """Render the playlists list page."""
+        return render_template("playlists.html")
+
+    @app.route("/playlist/<int:playlist_id>")
+    def playlist_detail_page(playlist_id: int):
+        """Render the playlist detail page."""
+        conn = get_db_conn()
+        row = conn.execute(
+            """SELECT p.*, COUNT(pi.id) as video_count 
+               FROM playlists p 
+               LEFT JOIN playlist_items pi ON p.id = pi.playlist_id 
+               WHERE p.id = ? GROUP BY p.id""",
+            (playlist_id,)
+        ).fetchone()
+        if not row:
+            abort(404)
+        playlist = dict(row)
+        return render_template("playlist_detail.html", playlist=playlist)
+
+    @app.route("/api/playlists", methods=["GET"])
+    def api_get_playlists():
+        """Get all playlists with video counts."""
+        conn = get_db_conn()
+        rows = conn.execute("""
+            SELECT p.id, p.name, p.description, p.color, p.created_at, p.updated_at,
+                   COUNT(pi.id) as video_count
+            FROM playlists p
+            LEFT JOIN playlist_items pi ON p.id = pi.playlist_id
+            GROUP BY p.id
+            ORDER BY p.updated_at DESC
+        """).fetchall()
+        return jsonify({
+            "playlists": [dict(r) for r in rows]
+        })
+
+    @app.route("/api/playlists", methods=["POST"])
+    def api_create_playlist():
+        """Create a new playlist."""
+        data = request.get_json()
+        if not data or not data.get("name"):
+            return jsonify({"error": "Playlist name is required"}), 400
+
+        conn = get_db_conn()
+        try:
+            cursor = conn.execute(
+                "INSERT INTO playlists (name, description, color) VALUES (?, ?, ?)",
+                (data["name"], data.get("description", ""), data.get("color", "#3b82f6"))
+            )
+            conn.commit()
+            return jsonify({
+                "success": True,
+                "id": cursor.lastrowid,
+                "name": data["name"]
+            })
+        except sqlite3.IntegrityError:
+            return jsonify({"error": "Playlist with this name already exists"}), 409
+
+    @app.route("/api/playlists/<int:playlist_id>", methods=["GET"])
+    def api_get_playlist(playlist_id: int):
+        """Get a single playlist with its videos."""
+        conn = get_db_conn()
+        
+        # Get playlist info
+        playlist_row = conn.execute(
+            """SELECT p.*, COUNT(pi.id) as video_count 
+               FROM playlists p 
+               LEFT JOIN playlist_items pi ON p.id = pi.playlist_id 
+               WHERE p.id = ? GROUP BY p.id""",
+            (playlist_id,)
+        ).fetchone()
+        
+        if not playlist_row:
+            return jsonify({"error": "Playlist not found"}), 404
+        
+        playlist = dict(playlist_row)
+        
+        # Get videos in playlist
+        video_rows = conn.execute(
+            """SELECT v.*, pi.position, pi.id as item_id
+               FROM playlist_items pi
+               JOIN videos v ON pi.video_id = v.id
+               WHERE pi.playlist_id = ?
+               ORDER BY pi.position""",
+            (playlist_id,)
+        ).fetchall()
+        
+        videos = []
+        for row in video_rows:
+            video = dict(row)
+            if video.get("file_hash"):
+                video["thumbnail_url"] = f"/thumbnail/{video['file_hash']}"
+            videos.append(video)
+        
+        return jsonify({
+            "playlist": playlist,
+            "videos": videos
+        })
+
+    @app.route("/api/playlists/<int:playlist_id>", methods=["PUT"])
+    def api_update_playlist(playlist_id: int):
+        """Update a playlist."""
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        conn = get_db_conn()
+        
+        # Check if playlist exists
+        row = conn.execute("SELECT id FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+        if not row:
+            return jsonify({"error": "Playlist not found"}), 404
+        
+        updates = []
+        params = []
+        
+        if "name" in data:
+            updates.append("name = ?")
+            params.append(data["name"])
+        if "description" in data:
+            updates.append("description = ?")
+            params.append(data["description"])
+        if "color" in data:
+            updates.append("color = ?")
+            params.append(data["color"])
+        
+        if not updates:
+            return jsonify({"error": "No fields to update"}), 400
+        
+        updates.append("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')")
+        params.append(playlist_id)
+        
+        conn.execute(
+            f"UPDATE playlists SET {', '.join(updates)} WHERE id = ?",
+            params
+        )
+        conn.commit()
+        
+        return jsonify({"success": True})
+
+    @app.route("/api/playlists/<int:playlist_id>", methods=["DELETE"])
+    def api_delete_playlist(playlist_id: int):
+        """Delete a playlist."""
+        conn = get_db_conn()
+        conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+        conn.commit()
+        return jsonify({"success": True})
+
+    @app.route("/api/playlists/<int:playlist_id>/items", methods=["POST"])
+    def api_add_to_playlist(playlist_id: int):
+        """Add a video to a playlist."""
+        data = request.get_json()
+        if not data or "video_id" not in data:
+            return jsonify({"error": "video_id is required"}), 400
+        
+        video_id = data["video_id"]
+        position = data.get("position")  # Optional: specific position
+        
+        conn = get_db_conn()
+        
+        # Check if playlist exists
+        playlist = conn.execute("SELECT id FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+        
+        # Check if video exists
+        video = conn.execute("SELECT id FROM videos WHERE id = ?", (video_id,)).fetchone()
+        if not video:
+            return jsonify({"error": "Video not found"}), 404
+        
+        try:
+            if position is not None:
+                # Shift existing items at and after this position
+                conn.execute(
+                    """UPDATE playlist_items 
+                       SET position = position + 1 
+                       WHERE playlist_id = ? AND position >= ?""",
+                    (playlist_id, position)
+                )
+            else:
+                # Get next position
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(position), 0) + 1 FROM playlist_items WHERE playlist_id = ?",
+                    (playlist_id,)
+                ).fetchone()
+                position = row[0]
+            
+            cursor = conn.execute(
+                "INSERT INTO playlist_items (playlist_id, video_id, position) VALUES (?, ?, ?)",
+                (playlist_id, video_id, position)
+            )
+            
+            # Update playlist timestamp
+            conn.execute(
+                "UPDATE playlists SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+                (playlist_id,)
+            )
+            conn.commit()
+            
+            return jsonify({"success": True, "item_id": cursor.lastrowid, "position": position})
+        except sqlite3.IntegrityError:
+            return jsonify({"error": "Video already in playlist"}), 409
+
+    @app.route("/api/playlists/<int:playlist_id>/items/<int:video_id>", methods=["DELETE"])
+    def api_remove_from_playlist(playlist_id: int, video_id: int):
+        """Remove a video from a playlist."""
+        conn = get_db_conn()
+        
+        # Get current position
+        row = conn.execute(
+            "SELECT position FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+            (playlist_id, video_id)
+        ).fetchone()
+        
+        if not row:
+            return jsonify({"error": "Video not in playlist"}), 404
+        
+        position = row[0]
+        
+        # Delete the item
+        conn.execute(
+            "DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+            (playlist_id, video_id)
+        )
+        
+        # Reorder remaining items to fill the gap
+        conn.execute(
+            """UPDATE playlist_items 
+               SET position = position - 1 
+               WHERE playlist_id = ? AND position > ?""",
+            (playlist_id, position)
+        )
+        
+        # Update playlist timestamp
+        conn.execute(
+            "UPDATE playlists SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+            (playlist_id,)
+        )
+        conn.commit()
+        
+        return jsonify({"success": True})
+
+    @app.route("/api/playlists/<int:playlist_id>/reorder", methods=["POST"])
+    def api_reorder_playlist(playlist_id: int):
+        """Reorder videos in a playlist."""
+        data = request.get_json()
+        if not data or "video_id" not in data or "new_position" not in data:
+            return jsonify({"error": "video_id and new_position are required"}), 400
+        
+        video_id = data["video_id"]
+        new_position = data["new_position"]
+        
+        conn = get_db_conn()
+        
+        # Get current position
+        row = conn.execute(
+            "SELECT position FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+            (playlist_id, video_id)
+        ).fetchone()
+        
+        if not row:
+            return jsonify({"error": "Video not in playlist"}), 404
+        
+        old_position = row[0]
+        
+        if old_position == new_position:
+            return jsonify({"success": True})  # No change needed
+        
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            if old_position < new_position:
+                # Moving down: decrement positions between old and new
+                conn.execute(
+                    """UPDATE playlist_items
+                       SET position = position - 1
+                       WHERE playlist_id = ? AND position > ? AND position <= ?""",
+                    (playlist_id, old_position, new_position)
+                )
+            else:
+                # Moving up: increment positions between new and old
+                conn.execute(
+                    """UPDATE playlist_items
+                       SET position = position + 1
+                       WHERE playlist_id = ? AND position >= ? AND position < ?""",
+                    (playlist_id, new_position, old_position)
+                )
+            
+            # Update the moved item
+            conn.execute(
+                "UPDATE playlist_items SET position = ? WHERE playlist_id = ? AND video_id = ?",
+                (new_position, playlist_id, video_id)
+            )
+            
+            # Update playlist timestamp
+            conn.execute(
+                "UPDATE playlists SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+                (playlist_id,)
+            )
+            
+            conn.commit()
+            return jsonify({"success": True})
+        except Exception as e:
+            conn.execute("ROLLBACK")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/playlists/<int:playlist_id>/export", methods=["GET"])
+    def api_export_playlist(playlist_id: int):
+        """Export playlist to various formats."""
+        from io import StringIO
+        import csv
+        
+        export_format = request.args.get("format", "json").lower()
+        
+        conn = get_db_conn()
+        
+        # Get playlist info
+        playlist_row = conn.execute(
+            """SELECT p.*, COUNT(pi.id) as video_count 
+               FROM playlists p 
+               LEFT JOIN playlist_items pi ON p.id = pi.playlist_id 
+               WHERE p.id = ? GROUP BY p.id""",
+            (playlist_id,)
+        ).fetchone()
+        
+        if not playlist_row:
+            return jsonify({"error": "Playlist not found"}), 404
+        
+        playlist = dict(playlist_row)
+        
+        # Get videos in playlist
+        video_rows = conn.execute(
+            """SELECT v.*, pi.position
+               FROM playlist_items pi
+               JOIN videos v ON pi.video_id = v.id
+               WHERE pi.playlist_id = ?
+               ORDER BY pi.position""",
+            (playlist_id,)
+        ).fetchall()
+        
+        videos = [dict(r) for r in video_rows]
+        drive = Path(current_app.config["DRIVE_PATH"])
+        
+        if export_format == "fcpxml":
+            # Generate FCPXML
+            xml_content = generate_fcpxml(playlist, videos, drive)
+            filename = f"{playlist['name'].replace(' ', '_')}.fcpxml"
+            return xml_content, 200, {
+                "Content-Type": "application/xml",
+                "Content-Disposition": f"attachment; filename=\"{filename}\""
+            }
+        elif export_format == "csv":
+            # Generate CSV
+            output = StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["Position", "Filename", "Description", "Duration", "File Path", "Resolution", "Tags"])
+            for video in videos:
+                tags = video.get("tags", "")
+                try:
+                    tags = json.loads(tags) if tags else []
+                    tags = ", ".join(tags) if isinstance(tags, list) else tags
+                except:
+                    pass
+                writer.writerow([
+                    video["position"],
+                    video["file_name"],
+                    video.get("scene_description", ""),
+                    video.get("duration_seconds", ""),
+                    video["file_path"],
+                    video.get("resolution", ""),
+                    tags
+                ])
+            filename = f"{playlist['name'].replace(' ', '_')}.csv"
+            return output.getvalue(), 200, {
+                "Content-Type": "text/csv",
+                "Content-Disposition": f"attachment; filename=\"{filename}\""
+            }
+        else:  # json
+            export_data = {
+                "playlist": {
+                    "id": playlist["id"],
+                    "name": playlist["name"],
+                    "description": playlist.get("description"),
+                    "color": playlist.get("color"),
+                    "created_at": playlist["created_at"],
+                    "video_count": playlist["video_count"]
+                },
+                "items": [
+                    {
+                        "position": video["position"],
+                        "video_id": video["id"],
+                        "file_name": video["file_name"],
+                        "file_path": video["file_path"],
+                        "description": video.get("scene_description"),
+                        "duration_seconds": video.get("duration_seconds"),
+                        "resolution": video.get("resolution"),
+                        "tags": video.get("tags"),
+                        "gps_location_name": video.get("gps_location_name"),
+                        "thumbnail_path": video.get("thumbnail_path")
+                    }
+                    for video in videos
+                ]
+            }
+            filename = f"{playlist['name'].replace(' ', '_')}.json"
+            return jsonify(export_data), 200, {
+                "Content-Disposition": f"attachment; filename=\"{filename}\""
+            }
+
+    def generate_fcpxml(playlist, videos, drive):
+        """Generate FCPXML for Final Cut Pro import."""
+        import xml.etree.ElementTree as ET
+        from datetime import datetime
+        
+        # FCPXML 1.10 format
+        root = ET.Element("fcpxml", version="1.10")
+        
+        # Resources
+        resources = ET.SubElement(root, "resources")
+        
+        # Format resource
+        format_res = ET.SubElement(resources, "format", {
+            "id": "r1",
+            "name": "FFVideoFormat1080p30",
+            "width": "1920",
+            "height": "1080"
+        })
+        
+        # Add asset resources for each video
+        for i, video in enumerate(videos):
+            asset_id = f"r{i+2}"
+            file_path = (drive / video["file_path"]).resolve()
+            duration_ms = int(video.get("duration_seconds", 0) * 1000)
+            duration = f"{duration_ms}/1000s" if duration_ms > 0 else "0/1s"
+            asset = ET.SubElement(resources, "asset", {
+                "id": asset_id,
+                "name": video["file_name"],
+                "src": f"file://{file_path}",
+                "duration": duration,
+                "hasVideo": "1",
+                "hasAudio": "1"
+            })
+        
+        # Library
+        library = ET.SubElement(root, "library")
+        
+        # Event
+        event = ET.SubElement(library, "event", {"name": playlist["name"]})
+        
+        # Project
+        project = ET.SubElement(event, "project", {"name": playlist["name"]})
+        
+        # Sequence
+        sequence = ET.SubElement(project, "sequence", {
+            "duration": "0/1s",
+            "format": "r1"
+        })
+        
+        spine = ET.SubElement(sequence, "spine")
+        
+        # Add clips to spine
+        for i, video in enumerate(videos):
+            asset_id = f"r{i+2}"
+            duration_ms = int(video.get("duration_seconds", 0) * 1000)
+            duration = f"{duration_ms}/1000s" if duration_ms > 0 else "0/1s"
+            clip = ET.SubElement(spine, "asset-clip", {
+                "ref": asset_id,
+                "duration": duration,
+                "name": video["file_name"]
+            })
+        
+        # Convert to string
+        try:
+            ET.indent(root, space="  ")
+        except AttributeError:
+            pass  # Python < 3.9 doesn't have ET.indent
+        xml_str = ET.tostring(root, encoding="unicode")
+        return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_str
+
+    @app.route("/api/videos/<int:video_id>/playlists", methods=["GET"])
+    def api_get_video_playlists(video_id: int):
+        """Get all playlists that contain a specific video."""
+        conn = get_db_conn()
+        rows = conn.execute(
+            """SELECT p.*, pi.position
+               FROM playlists p
+               JOIN playlist_items pi ON p.id = pi.playlist_id
+               WHERE pi.video_id = ?
+               ORDER BY p.name""",
+            (video_id,)
+        ).fetchall()
+        return jsonify({"playlists": [dict(r) for r in rows]})
+
+    @app.route("/api/batch/add-to-playlist", methods=["POST"])
+    def api_batch_add_to_playlist():
+        """Add multiple videos to a playlist."""
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        video_ids = data.get("video_ids", [])
+        playlist_id = data.get("playlist_id")
+        playlist_name = data.get("playlist_name")
+
+        if not video_ids:
+            return jsonify({"error": "No video IDs provided"}), 400
+
+        conn = get_db_conn()
+
+        # Create playlist if name provided and not existing
+        if playlist_name and not playlist_id:
+            try:
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO playlists (name, color) VALUES (?, ?)",
+                    (playlist_name, "#3b82f6")
+                )
+                if cursor.lastrowid:
+                    playlist_id = cursor.lastrowid
+                else:
+                    # Get existing playlist ID
+                    row = conn.execute(
+                        "SELECT id FROM playlists WHERE name = ?", (playlist_name,)
+                    ).fetchone()
+                    playlist_id = row[0]
+            except sqlite3.Error as e:
+                return jsonify({"error": f"Failed to create playlist: {e}"}), 500
+
+        if not playlist_id:
+            return jsonify({"error": "Playlist ID or name is required"}), 400
+
+        try:
+            # Get current max position
+            row = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) FROM playlist_items WHERE playlist_id = ?",
+                (playlist_id,)
+            ).fetchone()
+            start_pos = row[0] + 1 if row else 1
+
+            added_count = 0
+            for idx, video_id in enumerate(video_ids):
+                try:
+                    conn.execute(
+                        "INSERT INTO playlist_items (playlist_id, video_id, position) VALUES (?, ?, ?)",
+                        (playlist_id, video_id, start_pos + idx)
+                    )
+                    added_count += 1
+                except sqlite3.IntegrityError:
+                    pass  # Video already in playlist, skip
+
+            # Update playlist timestamp
+            conn.execute(
+                "UPDATE playlists SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+                (playlist_id,)
+            )
+            conn.commit()
+
+            return jsonify({
+                "success": True,
+                "added_count": added_count,
+                "skipped_count": len(video_ids) - added_count,
+                "playlist_id": playlist_id
+            })
+        except sqlite3.Error as e:
+            return jsonify({"error": str(e)}), 500
+
+    # Initialize playlists table on app startup
+    with app.app_context():
+        try:
+            init_playlists_table()
+        except Exception as e:
+            app.logger.warning(f"Could not initialize playlists table: {e}")
+
     return app
