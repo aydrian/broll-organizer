@@ -8,15 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, request
 
 from .config import get_db_path, get_thumbs_dir, AGENT_API_HOST, AGENT_API_PORT
-from .db import Database
-from .search import hybrid_search, keyword_search, semantic_search
-from .chat import chat_with_catalog
 
 
 def create_agent_app(drive_path: str | Path) -> Flask:
@@ -38,9 +36,11 @@ def create_agent_app(drive_path: str | Path) -> Flask:
     app.config["DB_PATH"] = db_path
     app.config["THUMBS_DIR"] = thumbs_dir
 
-    def get_db() -> Database:
-        """Get a database connection."""
-        return Database(db_path)
+    def get_db_conn() -> sqlite3.Connection:
+        """Get a simple database connection (without sqlite-vec for queries)."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     @app.route("/health", methods=["GET"])
     def health() -> dict:
@@ -57,53 +57,98 @@ def create_agent_app(drive_path: str | Path) -> Flask:
         if not db_path.exists():
             return jsonify({"error": "Database not found"}), 404
 
-        with get_db() as db:
-            s = db.get_catalog_stats()
+        conn = get_db_conn()
+        cursor = conn.cursor()
 
-        return jsonify({
-            "total_videos": s["total_videos"],
-            "analyzed_count": s["analyzed_count"],
-            "total_with_embeddings": s["total_with_embeddings"],
-            "geotagged_count": s["geotagged_count"],
-            "device_count": s["device_count"],
-            "total_size_bytes": s["total_size_bytes"],
-            "total_duration_seconds": s["total_duration_seconds"],
-        })
+        stats = {}
+
+        # Total videos
+        cursor.execute("SELECT COUNT(*) FROM videos")
+        stats["total_videos"] = cursor.fetchone()[0]
+
+        # Videos with descriptions
+        cursor.execute("SELECT COUNT(*) FROM videos WHERE scene_description IS NOT NULL AND scene_description != ''")
+        stats["analyzed_count"] = cursor.fetchone()[0]
+
+        # Videos with embeddings (check if column exists first)
+        try:
+            cursor.execute("SELECT COUNT(*) FROM videos WHERE embedding IS NOT NULL")
+            stats["total_with_embeddings"] = cursor.fetchone()[0]
+        except sqlite3.OperationalError:
+            stats["total_with_embeddings"] = 0
+
+        # Geotagged
+        cursor.execute("SELECT COUNT(*) FROM videos WHERE gps_latitude IS NOT NULL")
+        stats["geotagged_count"] = cursor.fetchone()[0]
+
+        # Source devices
+        cursor.execute("SELECT COUNT(DISTINCT source_device) FROM videos")
+        stats["device_count"] = cursor.fetchone()[0]
+
+        # Total size and duration
+        cursor.execute("SELECT SUM(file_size), SUM(duration_seconds) FROM videos")
+        row = cursor.fetchone()
+        stats["total_size_bytes"] = row[0] or 0
+        stats["total_duration_seconds"] = row[1] or 0
+
+        conn.close()
+
+        return jsonify(stats)
 
     @app.route("/search", methods=["GET"])
     def search() -> dict:
         """
-        Search the catalog.
+        Search the catalog using FTS5.
 
         Query params:
             q: Search query string
-            mode: "hybrid" (default), "keyword", or "semantic"
             limit: Max results (default 10)
         """
         if not db_path.exists():
             return jsonify({"error": "Database not found"}), 404
 
         query = request.args.get("q", "")
-        mode = request.args.get("mode", "hybrid")
         limit = request.args.get("limit", 10, type=int)
 
         if not query:
             return jsonify({"error": "Missing query parameter 'q'"}), 400
 
-        with get_db() as db:
-            if mode == "keyword":
-                results = keyword_search(query, db, limit)
-            elif mode == "semantic":
-                results = semantic_search(query, db, limit)
-            else:
-                results = hybrid_search(query, db, limit)
+        conn = get_db_conn()
+
+        # Use FTS5 for full-text search
+        sql = """
+            SELECT v.*, rank
+            FROM videos v
+            JOIN videos_fts fts ON v.id = fts.rowid
+            WHERE videos_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+        """
+
+        try:
+            cursor = conn.execute(sql, (query, limit))
+            rows = cursor.fetchall()
+        except sqlite3.OperationalError as e:
+            # Fallback if FTS fails
+            pattern = f"%{query}%"
+            sql = """
+                SELECT v.*, 0 as rank
+                FROM videos v
+                WHERE scene_description LIKE ?
+                   OR file_name LIKE ?
+                   OR tags LIKE ?
+                LIMIT ?
+            """
+            cursor = conn.execute(sql, (pattern, pattern, pattern, limit))
+            rows = cursor.fetchall()
+
+        conn.close()
 
         # Simplify results for JSON response
-        simplified = [_simplify_video(v) for v in results]
+        simplified = [_simplify_video(dict(r)) for r in rows]
 
         return jsonify({
             "query": query,
-            "mode": mode,
             "count": len(simplified),
             "results": simplified,
         })
@@ -114,13 +159,15 @@ def create_agent_app(drive_path: str | Path) -> Flask:
         if not db_path.exists():
             return jsonify({"error": "Database not found"}), 404
 
-        with get_db() as db:
-            video = db.get_video_by_id(video_id)
+        conn = get_db_conn()
+        cursor = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,))
+        row = cursor.fetchone()
+        conn.close()
 
-        if not video:
+        if not row:
             return jsonify({"error": "Video not found"}), 404
 
-        return jsonify(_simplify_video(video))
+        return jsonify(_simplify_video(dict(row)))
 
     @app.route("/videos", methods=["GET"])
     def list_videos() -> dict:
@@ -139,25 +186,29 @@ def create_agent_app(drive_path: str | Path) -> Flask:
         location = request.args.get("location")
         device = request.args.get("device")
 
-        with get_db() as db:
-            if location:
-                # Search in gps_location_name and file_path for location
-                pattern = f"%{location}%"
-                sql = """
-                    SELECT * FROM videos
-                    WHERE gps_location_name LIKE ? OR file_path LIKE ?
-                    ORDER BY create_date
-                    LIMIT ?
-                """
-                results = db._execute(sql, (pattern, pattern, limit)).fetchall()
-            elif device:
-                sql = "SELECT * FROM videos WHERE source_device = ? LIMIT ?"
-                results = db._execute(sql, (device, limit)).fetchall()
-            else:
-                sql = "SELECT * FROM videos ORDER BY file_path LIMIT ?"
-                results = db._execute(sql, (limit,)).fetchall()
+        conn = get_db_conn()
 
-        simplified = [_simplify_video(dict(r)) for r in results]
+        if location:
+            # Search in gps_location_name and file_path for location
+            pattern = f"%{location}%"
+            sql = """
+                SELECT * FROM videos
+                WHERE gps_location_name LIKE ? OR file_path LIKE ?
+                ORDER BY create_date
+                LIMIT ?
+            """
+            cursor = conn.execute(sql, (pattern, pattern, limit))
+        elif device:
+            sql = "SELECT * FROM videos WHERE source_device = ? LIMIT ?"
+            cursor = conn.execute(sql, (device, limit))
+        else:
+            sql = "SELECT * FROM videos ORDER BY file_path LIMIT ?"
+            cursor = conn.execute(sql, (limit,))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        simplified = [_simplify_video(dict(r)) for r in rows]
 
         return jsonify({
             "count": len(simplified),
@@ -170,14 +221,16 @@ def create_agent_app(drive_path: str | Path) -> Flask:
         if not db_path.exists():
             return jsonify({"error": "Database not found"}), 404
 
-        with get_db() as db:
-            video = db.get_video_by_id(video_id)
+        conn = get_db_conn()
+        cursor = conn.execute("SELECT file_hash FROM videos WHERE id = ?", (video_id,))
+        row = cursor.fetchone()
+        conn.close()
 
-        if not video:
+        if not row:
             return jsonify({"error": "Video not found"}), 404
 
         # Try to find thumbnail by hash
-        file_hash = video.get("file_hash")
+        file_hash = row[0]
         if file_hash:
             thumb_path = thumbs_dir / f"{file_hash}.jpg"
             if thumb_path.exists():
@@ -200,17 +253,47 @@ def create_agent_app(drive_path: str | Path) -> Flask:
 
         data = request.get_json() or {}
         message = data.get("message", "")
-        history = data.get("history", [])
 
         if not message:
             return jsonify({"error": "Missing 'message' field"}), 400
 
-        with get_db() as db:
-            result = chat_with_catalog(message, db, history)
+        # Simple keyword search from the message
+        # (Full chat with LLM requires additional setup)
+        search_terms = " ".join([w for w in message.lower().split() if len(w) > 3])
+
+        conn = get_db_conn()
+
+        try:
+            # Try FTS first
+            sql = """
+                SELECT v.*, rank
+                FROM videos v
+                JOIN videos_fts fts ON v.id = fts.rowid
+                WHERE videos_fts MATCH ?
+                ORDER BY rank
+                LIMIT 5
+            """
+            cursor = conn.execute(sql, (search_terms,))
+            rows = cursor.fetchall()
+        except:
+            # Fallback
+            pattern = f"%{search_terms}%"
+            sql = """
+                SELECT v.*, 0 as rank
+                FROM videos v
+                WHERE scene_description LIKE ? OR tags LIKE ?
+                LIMIT 5
+            """
+            cursor = conn.execute(sql, (pattern, pattern))
+            rows = cursor.fetchall()
+
+        conn.close()
+
+        videos = [_simplify_video(dict(r)) for r in rows]
 
         return jsonify({
-            "response": result["response"],
-            "videos": [_simplify_video(v) for v in result["videos"]],
+            "response": f"Found {len(videos)} videos related to your query.",
+            "videos": videos,
         })
 
     return app
