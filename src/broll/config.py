@@ -1,9 +1,14 @@
-# src/broll/config.py
 """
 Central configuration for the b-roll organizer.
 All paths are relative to the drive root so the database stays portable.
 """
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env file from project root (where pyproject.toml is)
+# Falls back to current working directory if not found
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 # File extensions we consider video files
 VIDEO_EXTENSIONS: set[str] = {".mp4", ".mov", ".m4v", ".MP4", ".MOV"}

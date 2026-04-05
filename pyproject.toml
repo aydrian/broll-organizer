@@ -1,6 +1,6 @@
 [project]
 name = "broll-organizer"
-version = "0.2.0"
+version = "0.2.1"
 description = "AI-powered b-roll organizer using Fireworks AI (with Ollama fallback)"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,6 +10,7 @@ dependencies = [
     "flask>=3.1",
     "ollama>=0.4",
     "pillow>=11.0",
+    "python-dotenv>=1.0",
     "reverse-geocoder>=1.5",
     "sqlite-vec>=0.1",
     "tqdm>=4.67",

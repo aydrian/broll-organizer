@@ -29,8 +29,16 @@ The project has three main interfaces:
 
 ### Option 1: Fireworks AI (Recommended)
 
-Set your Fireworks API key as an environment variable:
+Set your Fireworks API key. You can either:
 
+**A. Use a `.env` file (recommended):**
+```bash
+cp .env.example .env
+# Edit .env and add your key:
+FIREWORKS_API_KEY=your-api-key-here
+```
+
+**B. Set environment variable:**
 ```bash
 export FIREWORKS_API_KEY="your-api-key-here"
 ```
@@ -48,8 +56,9 @@ For offline use, install [Ollama](https://ollama.com/):
     ollama pull nomic-embed-text  # Embeddings
     ollama pull gemma3:4b      # Chat
     ```
-3.  **Set Provider:**
+3.  **Set Provider in `.env` or env var:**
     ```bash
+    # In .env file or:
     export AI_PROVIDER=ollama
     ```
 
