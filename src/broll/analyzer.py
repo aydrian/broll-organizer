@@ -24,7 +24,10 @@ if AI_PROVIDER == "fireworks":
     try:
         from fireworks.client import Fireworks
 
-        fireworks_client = Fireworks(api_key=os.environ.get("FIREWORKS_API_KEY"))
+        fireworks_client = Fireworks(
+            api_key=os.environ.get("FIREWORKS_API_KEY"),
+            base_url="https://api.fireworks.ai/inference/v1"
+        )
     except ImportError:
         pass
 else:
