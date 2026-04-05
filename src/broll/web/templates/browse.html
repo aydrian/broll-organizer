@@ -16,6 +16,33 @@
     </div>
 </div>
 
+    <!-- Batch Actions Toolbar -->
+    <div id="batch-toolbar" class="batch-toolbar">
+        <div class="batch-left">
+            <span class="batch-count"><span id="selection-count">0</span> selected</span>
+            <button id="select-all-btn" class="batch-btn">Select All</button>
+            <button id="deselect-all-btn" class="batch-btn" style="display: none;">Deselect All</button>
+        </div>
+        <div class="batch-actions">
+            <div class="dropdown">
+                <button id="add-to-playlist-btn" class="batch-btn dropdown-toggle">
+                    + Playlist ▼
+                </button>
+                <div id="playlist-dropdown" class="dropdown-menu">
+                    <div class="dropdown-header">Existing Playlists</div>
+                    <div id="playlist-list"></div>
+                    <div class="dropdown-divider"></div>
+                    <input type="text" id="new-playlist-name" placeholder="New playlist name...">
+                    <button id="create-playlist-btn" class="dropdown-btn">Create & Add</button>
+                </div>
+            </div>
+            <button id="export-btn" class="batch-btn">Export</button>
+            <button id="download-thumbs-btn" class="batch-btn">Thumbnails</button>
+            <button id="batch-location-btn" class="batch-btn">Set Location</button>
+            <button id="clear-selection-btn" class="batch-btn batch-btn-secondary">Clear</button>
+        </div>
+    </div>
+
     <div id="breadcrumbs" class="breadcrumbs"></div>
 
     <div id="folder-grid" class="folder-grid"></div>
@@ -24,6 +51,34 @@
     
     <div id="loader" class="loader">Loading...</div>
     <div id="sentinel" class="sentinel"></div>
+
+    <!-- Batch Location Modal -->
+    <div id="batch-location-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Set Location for Selected Videos</h3>
+            <input type="text" id="batch-location-search" placeholder="Search for a location...">
+            <div id="batch-location-results" class="location-results"></div>
+            <div class="modal-actions">
+                <button id="batch-location-cancel" class="btn-secondary">Cancel</button>
+                <button id="batch-location-confirm" class="btn-primary" disabled>Set Location</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div id="export-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Export Selected Videos</h3>
+            <div class="export-options">
+                <label><input type="radio" name="export-format" value="csv" checked> CSV (spreadsheet)</label>
+                <label><input type="radio" name="export-format" value="txt"> TXT (simple list)</label>
+            </div>
+            <div class="modal-actions">
+                <button id="export-cancel" class="btn-secondary">Cancel</button>
+                <button id="export-confirm" class="btn-primary">Export</button>
+            </div>
+        </div>
+    </div>
 {% endblock %}
 
 {% block scripts %}
