@@ -1,0 +1,74 @@
+<!-- src/broll/web/templates/map.html -->
+{% extends "base.html" %}
+{% block title %}Map - B-Roll Catalog{% endblock %}
+
+{% block head %}
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<!-- Leaflet MarkerCluster CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+{% endblock %}
+
+{% block content %}
+<div class="map-layout">
+    <!-- Sidebar for location filtering -->
+    <aside class="map-sidebar" id="map-sidebar">
+        <div class="sidebar-header">
+            <h2>Locations</h2>
+            <button id="fit-bounds-btn" class="btn-secondary" title="Fit all markers">
+                <span>🎯</span> Fit All
+            </button>
+        </div>
+        
+        <div class="sidebar-content">
+            <div id="location-filters" class="location-filters">
+                <div class="loading">Loading locations...</div>
+            </div>
+        </div>
+        
+        <div class="sidebar-footer">
+            <div id="stats-display" class="stats-display">
+                <span id="visible-count">0</span> clips visible
+            </div>
+        </div>
+    </aside>
+
+    <!-- Map container -->
+    <div class="map-container">
+        <div id="map" class="map"></div>
+        
+        <!-- Empty state overlay -->
+        <div id="map-empty-state" class="map-empty-state hidden">
+            <div class="empty-content">
+                <div class="empty-icon">🗺️</div>
+                <h3>No Geotagged Videos</h3>
+                <p>No videos with GPS coordinates were found in your catalog.</p>
+                <p class="empty-hint">Videos with location data will appear on the map.</p>
+            </div>
+        </div>
+        
+        <!-- Loading overlay -->
+        <div id="map-loading" class="map-loading">
+            <div class="loading-spinner"></div>
+            <span>Loading map data...</span>
+        </div>
+        
+        <!-- Context menu for map clicks -->
+        <div id="map-context-menu" class="map-context-menu hidden">
+            <button id="find-nearby-btn" class="context-btn">
+                <span>🔍</span> Find videos near here
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Leaflet MarkerCluster JS -->
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<!-- Map application -->
+<script src="/static/map.js"></script>
+{% endblock %}
