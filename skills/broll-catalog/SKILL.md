@@ -106,6 +106,21 @@ uv run broll doctor /media/openclaw/Crucial\ X10 --hashes        # Hash mismatch
 uv run broll doctor /media/openclaw/Crucial\ X10 --fix
 ```
 
+### Find videos near GPS coordinates
+```bash
+uv run broll nearby --drive /media/openclaw/Crucial\ X10 --lat 35.6762 --lon 139.6503 --radius 5km
+```
+
+### Find videos near a location name
+```bash
+uv run broll nearby --drive /media/openclaw/Crucial\ X10 --location "Shibuya Station" --radius 2km
+```
+
+### Manually set video location
+```bash
+uv run broll set-location --drive /media/openclaw/Crucial\ X10 --id 42 --lat 35.0 --lon 139.0
+```
+
 ### Launch web UI for browsing
 ```bash
 uv run broll web /media/openclaw/Crucial\ X10
