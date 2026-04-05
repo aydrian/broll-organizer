@@ -1,6 +1,6 @@
 [project]
 name = "broll-organizer"
-version = "0.2.1"
+version = "0.2.2"
 description = "AI-powered b-roll organizer using Fireworks AI (with Ollama fallback)"
 requires-python = ">=3.12"
 dependencies = [

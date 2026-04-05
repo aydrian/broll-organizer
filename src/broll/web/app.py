@@ -1,12 +1,13 @@
-# src/broll/web/app.py
 """
 Flask web application for browsing, searching, and chatting
 with the b-roll catalog.
-"""
 
+Uses plain sqlite3 to avoid sqlite-vec architecture issues on Raspberry Pi.
+"""
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 from flask import (
@@ -21,7 +22,6 @@ from flask import (
 )
 
 from ..config import get_db_path, get_thumbs_dir
-from ..db import Database
 
 
 def create_app(drive_path: str) -> Flask:
@@ -76,33 +76,159 @@ def create_app(drive_path: str) -> Flask:
 
     # ── Database helper ──
 
-    def get_db() -> Database:
-        if "db" not in g:
-            g.db = Database(current_app.config["DB_PATH"])
-            g.db.connect()
-        return g.db
+    def get_db_conn() -> sqlite3.Connection:
+        """Get a plain sqlite3 connection (no sqlite-vec)."""
+        if "db_conn" not in g:
+            g.db_conn = sqlite3.connect(current_app.config["DB_PATH"])
+            g.db_conn.row_factory = sqlite3.Row
+        return g.db_conn
 
     @app.teardown_appcontext
     def close_db(exc):
-        db = g.pop("db", None)
-        if db and hasattr(db, "_conn") and db._conn:
-            db._conn.close()
+        conn = g.pop("db_conn", None)
+        if conn:
+            conn.close()
+
+    def get_stats() -> dict:
+        """Get catalog statistics."""
+        conn = get_db_conn()
+        cursor = conn.cursor()
+
+        stats = {}
+        cursor.execute("SELECT COUNT(*) FROM videos")
+        stats["total_videos"] = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM videos WHERE scene_description IS NOT NULL AND scene_description != ''")
+        stats["analyzed_count"] = cursor.fetchone()[0]
+
+        try:
+            cursor.execute("SELECT COUNT(*) FROM videos WHERE embedding IS NOT NULL")
+            stats["total_with_embeddings"] = cursor.fetchone()[0]
+        except sqlite3.OperationalError:
+            stats["total_with_embeddings"] = 0
+
+        cursor.execute("SELECT COUNT(*) FROM videos WHERE gps_latitude IS NOT NULL")
+        stats["geotagged_count"] = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(DISTINCT source_device) FROM videos")
+        stats["device_count"] = cursor.fetchone()[0]
+
+        cursor.execute("SELECT SUM(file_size), SUM(duration_seconds) FROM videos")
+        row = cursor.fetchone()
+        stats["total_size_bytes"] = row[0] or 0
+        stats["total_duration_seconds"] = row[1] or 0
+
+        return stats
+
+    def get_video_by_id(video_id: int) -> dict | None:
+        """Get a single video by ID."""
+        conn = get_db_conn()
+        cursor = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_folder_contents(folder_path: str = "", limit: int = 24, offset: int = 0) -> dict:
+        """Get folder contents (folders and videos)."""
+        conn = get_db_conn()
+
+        # Build the folder prefix pattern
+        if folder_path:
+            prefix = folder_path + "/"
+        else:
+            prefix = ""
+
+        # Get subfolders (distinct first path component after prefix)
+        folder_sql = """
+            SELECT DISTINCT 
+                CASE 
+                    WHEN instr(substr(file_path, ?), '/') > 0 
+                    THEN substr(substr(file_path, ?), 1, instr(substr(file_path, ?), '/') - 1)
+                    ELSE substr(file_path, ?)
+                END as folder_name
+            FROM videos
+            WHERE file_path LIKE ?
+            ORDER BY folder_name
+        """
+        prefix_len = len(prefix) + 1
+        like_pattern = prefix + "%"
+
+        cursor = conn.execute(folder_sql, (prefix_len, prefix_len, prefix_len, prefix_len, like_pattern))
+        folder_rows = cursor.fetchall()
+
+        folders = []
+        for row in folder_rows:
+            name = row[0]
+            if name and name != folder_path and "/" not in name:
+                folders.append({"name": name, "path": (folder_path + "/" + name).strip("/")})
+
+        # Get videos in this folder
+        if folder_path:
+            video_sql = """
+                SELECT * FROM videos
+                WHERE file_path LIKE ? AND file_path NOT LIKE ?
+                ORDER BY file_name
+                LIMIT ? OFFSET ?
+            """
+            cursor = conn.execute(video_sql, (prefix + "%", prefix + "%/%", limit, offset))
+        else:
+            video_sql = """
+                SELECT * FROM videos
+                WHERE file_path NOT LIKE '%/%'
+                ORDER BY file_name
+                LIMIT ? OFFSET ?
+            """
+            cursor = conn.execute(video_sql, (limit, offset))
+
+        videos = [dict(r) for r in cursor.fetchall()]
+
+        return {"folders": folders, "videos": videos}
+
+    def search_videos(query: str, limit: int = 20) -> list[dict]:
+        """Search videos using FTS5 or fallback to LIKE."""
+        conn = get_db_conn()
+
+        try:
+            # Try FTS5 first
+            sql = """
+                SELECT v.*, rank
+                FROM videos v
+                JOIN videos_fts fts ON v.id = fts.rowid
+                WHERE videos_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+            """
+            cursor = conn.execute(sql, (query, limit))
+            rows = cursor.fetchall()
+        except sqlite3.OperationalError:
+            # Fallback to LIKE search
+            pattern = f"%{query}%"
+            sql = """
+                SELECT v.*, 0 as rank
+                FROM videos v
+                WHERE scene_description LIKE ? OR file_name LIKE ? OR tags LIKE ?
+                ORDER BY file_name
+                LIMIT ?
+            """
+            cursor = conn.execute(sql, (pattern, pattern, pattern, limit))
+            rows = cursor.fetchall()
+
+        return [dict(r) for r in rows]
+
+    def update_video(file_path: str, updates: dict):
+        """Update video fields."""
+        conn = get_db_conn()
+        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+        sql = f"UPDATE videos SET {set_clause} WHERE file_path = ?"
+        conn.execute(sql, list(updates.values()) + [file_path])
+        conn.commit()
 
     # ── Routes ──
 
     @app.route("/")
     def browse():
         """Render the browse page shell."""
-        # We pass initial stats but no videos, as the frontend will fetch them.
-        db = get_db()
-        stats = db.get_catalog_stats()
-
-        # Check if there's a specific video to highlight/scroll to (optional, but good for deep linking)
-        # For now, just render the shell.
-        return render_template(
-            "browse.html",
-            stats=stats,
-        )
+        stats = get_stats()
+        return render_template("browse.html", stats=stats)
 
     @app.route("/api/browse")
     def api_browse():
@@ -112,30 +238,19 @@ def create_app(drive_path: str) -> Flask:
         limit = request.args.get("limit", 24, type=int)
 
         offset = (page - 1) * limit
-        db = get_db()
 
-        # Use our new folder-aware query
-        contents = db.get_folder_contents(folder_path=path, limit=limit, offset=offset)
+        contents = get_folder_contents(folder_path=path, limit=limit, offset=offset)
 
-        # Calculate pagination for videos only (folders don't paginate currently)
-        # Note: We don't have a cheap "count videos in this folder" query yet.
-        # For infinite scroll, we can just return what we have.
-        # If we return fewer than limit videos, the frontend knows it's the end.
-
-        return jsonify(
-            {
-                "path": path,
-                "folders": contents["folders"],
-                "videos": contents["videos"],
-                "page": page,
-                "has_more": len(contents["videos"]) == limit,
-            }
-        )
+        return jsonify({
+            "path": path,
+            "folders": contents["folders"],
+            "videos": contents["videos"],
+            "page": page,
+            "has_more": len(contents["videos"]) == limit,
+        })
 
     @app.route("/search")
     def search_page():
-        from ..search import hybrid_search, keyword_search, semantic_search
-
         query = request.args.get("q", "").strip()
         mode = request.args.get("mode", "hybrid")
         limit = request.args.get("limit", 20, type=int)
@@ -143,14 +258,7 @@ def create_app(drive_path: str) -> Flask:
         if not query:
             return render_template("search_results.html", query="", results=[], mode=mode)
 
-        db = get_db()
-
-        if mode == "keyword":
-            results = keyword_search(query, db, limit)
-        elif mode == "semantic":
-            results = semantic_search(query, db, limit)
-        else:
-            results = hybrid_search(query, db, limit)
+        results = search_videos(query, limit)
 
         return render_template(
             "search_results.html",
@@ -161,8 +269,7 @@ def create_app(drive_path: str) -> Flask:
 
     @app.route("/video/<int:video_id>")
     def video_detail(video_id: int):
-        db = get_db()
-        video = db.get_video_by_id(video_id)
+        video = get_video_by_id(video_id)
         if not video:
             abort(404)
         return render_template("video_detail.html", video=video)
@@ -174,16 +281,29 @@ def create_app(drive_path: str) -> Flask:
     @app.route("/api/chat", methods=["POST"])
     def api_chat():
         from ..chat import chat_with_catalog
+        from ..db import Database
 
         data = request.get_json()
         if not data or not data.get("message"):
             return jsonify({"error": "No message provided"}), 400
 
-        db = get_db()
-        history = data.get("history", [])
-
-        result = chat_with_catalog(data["message"], db, history)
-        return jsonify(result)
+        # Chat requires the full Database class with search functions
+        # This may not work on Pi without sqlite-vec, so we do a simple fallback
+        try:
+            db_path = current_app.config["DB_PATH"]
+            with Database(db_path) as db:
+                history = data.get("history", [])
+                result = chat_with_catalog(data["message"], db, history)
+                return jsonify(result)
+        except Exception as e:
+            # Fallback to simple search
+            message = data["message"]
+            search_terms = " ".join([w for w in message.lower().split() if len(w) > 3])
+            videos = search_videos(search_terms, limit=5)
+            return jsonify({
+                "response": f"Found {len(videos)} videos related to your query.",
+                "videos": videos,
+            })
 
     @app.route("/thumbnail/<file_hash>")
     def thumbnail(file_hash: str):
@@ -196,8 +316,7 @@ def create_app(drive_path: str) -> Flask:
 
     @app.route("/video/stream/<int:video_id>")
     def stream_video(video_id: int):
-        db = get_db()
-        video = db.get_video_by_id(video_id)
+        video = get_video_by_id(video_id)
         if not video:
             abort(404)
 
@@ -217,7 +336,6 @@ def create_app(drive_path: str) -> Flask:
     def search_location():
         """
         Search for a location using OpenStreetMap Nominatim API.
-        This provides free geocoding with a generous usage policy.
         """
         import urllib.request
         import urllib.parse
@@ -226,11 +344,9 @@ def create_app(drive_path: str) -> Flask:
         if not query:
             return jsonify([])
 
-        # Nominaltim requires a User-Agent identifying the application
-        headers = {"User-Agent": "B-Roll-Organizer/0.1.0"}
+        headers = {"User-Agent": "B-Roll-Organizer/0.2.1"}
 
         try:
-            # Construct the API URL
             params = urllib.parse.urlencode(
                 {"q": query, "format": "json", "limit": 5, "addressdetails": 0}
             )
@@ -243,17 +359,14 @@ def create_app(drive_path: str) -> Flask:
 
                 data = json.loads(response.read().decode())
 
-                # Format the results for our frontend
                 results = []
                 for item in data:
-                    results.append(
-                        {
-                            "name": item.get("display_name"),
-                            "lat": float(item.get("lat")),
-                            "lon": float(item.get("lon")),
-                            "type": item.get("type", "unknown"),
-                        }
-                    )
+                    results.append({
+                        "name": item.get("display_name"),
+                        "lat": float(item.get("lat")),
+                        "lon": float(item.get("lon")),
+                        "type": item.get("type", "unknown"),
+                    })
 
                 return jsonify(results)
 
@@ -270,7 +383,7 @@ def create_app(drive_path: str) -> Flask:
 
         lat = data.get("lat")
         lon = data.get("lon")
-        name = data.get("name")  # Use provided name or reverse geocode later if needed
+        name = data.get("name")
 
         try:
             lat = float(lat)
@@ -278,20 +391,17 @@ def create_app(drive_path: str) -> Flask:
         except (ValueError, TypeError):
             return jsonify({"error": "Invalid coordinates"}), 400
 
-        db = get_db()
-        video = db.get_video_by_id(video_id)
+        video = get_video_by_id(video_id)
         if not video:
             abort(404)
 
         updates = {"gps_latitude": lat, "gps_longitude": lon, "gps_location_name": name}
-
-        db.update_video(video["file_path"], updates)
+        update_video(video["file_path"], updates)
 
         return jsonify({"success": True})
 
     @app.route("/api/stats")
     def api_stats():
-        db = get_db()
-        return jsonify(db.get_catalog_stats())
+        return jsonify(get_stats())
 
     return app
