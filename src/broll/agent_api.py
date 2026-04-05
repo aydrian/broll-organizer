@@ -3,18 +3,48 @@ OpenClaw Agent API for programmatic access to the B-roll catalog.
 
 This lightweight Flask API exposes endpoints for AI assistants to query
 the catalog without using the CLI or web UI.
+Implements connection pooling for improved performance.
 """
 from __future__ import annotations
 
 import json
 import os
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, request
 
 from .config import get_db_path, get_thumbs_dir, AGENT_API_HOST, AGENT_API_PORT
+
+# Thread-local storage for database connections per thread
+_thread_local = threading.local()
+
+
+def _get_thread_db_connection(db_path: str) -> sqlite3.Connection:
+    """
+    Get a thread-local database connection.
+    
+    Each thread gets its own connection stored in thread-local storage.
+    Connections are reused across requests within the same thread.
+    
+    Args:
+        db_path: Path to the SQLite database file.
+        
+    Returns:
+        A sqlite3 connection with Row factory configured.
+    """
+    # Use thread-local storage to ensure thread safety with SQLite
+    if not hasattr(_thread_local, 'db_connections'):
+        _thread_local.db_connections = {}
+    
+    if db_path not in _thread_local.db_connections:
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        _thread_local.db_connections[db_path] = conn
+    
+    return _thread_local.db_connections[db_path]
 
 
 def create_agent_app(drive_path: str | Path) -> Flask:
@@ -33,14 +63,20 @@ def create_agent_app(drive_path: str | Path) -> Flask:
 
     app = Flask(__name__)
     app.config["DRIVE_PATH"] = drive
-    app.config["DB_PATH"] = db_path
-    app.config["THUMBS_DIR"] = thumbs_dir
+    app.config["DB_PATH"] = str(db_path)
+    app.config["THUMBS_DIR"] = str(thumbs_dir)
 
     def get_db_conn() -> sqlite3.Connection:
-        """Get a simple database connection (without sqlite-vec for queries)."""
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        """
+        Get a database connection with thread-local caching.
+        
+        Uses thread-local storage to maintain one connection per thread,
+        reducing connection overhead for concurrent requests.
+        
+        Returns:
+            A sqlite3 connection with Row factory configured.
+        """
+        return _get_thread_db_connection(str(db_path))
 
     @app.route("/health", methods=["GET"])
     def health() -> dict:
@@ -91,8 +127,6 @@ def create_agent_app(drive_path: str | Path) -> Flask:
         stats["total_size_bytes"] = row[0] or 0
         stats["total_duration_seconds"] = row[1] or 0
 
-        conn.close()
-
         return jsonify(stats)
 
     @app.route("/search", methods=["GET"])
@@ -142,8 +176,6 @@ def create_agent_app(drive_path: str | Path) -> Flask:
             cursor = conn.execute(sql, (pattern, pattern, pattern, limit))
             rows = cursor.fetchall()
 
-        conn.close()
-
         # Simplify results for JSON response
         simplified = [_simplify_video(dict(r)) for r in rows]
 
@@ -162,7 +194,6 @@ def create_agent_app(drive_path: str | Path) -> Flask:
         conn = get_db_conn()
         cursor = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,))
         row = cursor.fetchone()
-        conn.close()
 
         if not row:
             return jsonify({"error": "Video not found"}), 404
@@ -206,7 +237,6 @@ def create_agent_app(drive_path: str | Path) -> Flask:
             cursor = conn.execute(sql, (limit,))
 
         rows = cursor.fetchall()
-        conn.close()
 
         simplified = [_simplify_video(dict(r)) for r in rows]
 
@@ -224,7 +254,6 @@ def create_agent_app(drive_path: str | Path) -> Flask:
         conn = get_db_conn()
         cursor = conn.execute("SELECT file_hash FROM videos WHERE id = ?", (video_id,))
         row = cursor.fetchone()
-        conn.close()
 
         if not row:
             return jsonify({"error": "Video not found"}), 404
@@ -286,8 +315,6 @@ def create_agent_app(drive_path: str | Path) -> Flask:
             """
             cursor = conn.execute(sql, (pattern, pattern))
             rows = cursor.fetchall()
-
-        conn.close()
 
         videos = [_simplify_video(dict(r)) for r in rows]
 

@@ -5,35 +5,14 @@ Uses search results as context for the chat LLM.
 from __future__ import annotations
 
 import json
-import os
 from typing import TYPE_CHECKING
 
+from .clients import get_fireworks_client, get_ollama_client
 from .config import AI_PROVIDER, FIREWORKS_CHAT_MODEL, OLLAMA_CHAT_MODEL
 from .search import hybrid_search
 
 if TYPE_CHECKING:
     from .db import Database
-
-
-# Try to import providers
-fireworks_client = None
-ollama = None
-
-if AI_PROVIDER == "fireworks":
-    try:
-        from fireworks.client import Fireworks
-
-        fireworks_client = Fireworks(
-            api_key=os.environ.get("FIREWORKS_API_KEY"),
-            base_url="https://api.fireworks.ai/inference/v1"
-        )
-    except ImportError:
-        pass
-else:
-    try:
-        import ollama
-    except ImportError:
-        pass
 
 
 SYSTEM_PROMPT = (
@@ -103,6 +82,7 @@ def chat_with_catalog(
 
 def _chat_with_fireworks(messages: list[dict]) -> str:
     """Send messages to Fireworks AI Kimi K2.5 Turbo."""
+    fireworks_client = get_fireworks_client()
     if fireworks_client is None:
         raise RuntimeError("Fireworks client not available")
 
@@ -118,6 +98,7 @@ def _chat_with_fireworks(messages: list[dict]) -> str:
 
 def _chat_with_ollama(messages: list[dict]) -> str:
     """Send messages to local Ollama."""
+    ollama = get_ollama_client()
     if ollama is None:
         raise RuntimeError("Ollama not available")
 
