@@ -748,9 +748,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         elements.videoGrid.insertAdjacentHTML('beforeend', html);
 
-        // Update video cards array for keyboard navigation
-        state.videoCards = Array.from(elements.videoGrid.querySelectorAll('.video-card'));
-
         // Add event handlers to new cards
         elements.videoGrid.querySelectorAll('.video-card').forEach((card, index) => {
             const id = parseInt(card.dataset.id);
@@ -1092,5 +1089,46 @@ document.addEventListener('DOMContentLoaded', () => {
         if (modal) {
             modal.classList.add('hidden');
         }
+    }
+});
+
+// ═════════════════════════════════════════════════════════════════
+// Individual Add-to-Playlist button handlers
+// These are added after the initial page load for dynamically loaded content
+// ═════════════════════════════════════════════════════════════════
+
+function setupAddToPlaylistButtons() {
+    const videoGrid = document.getElementById('video-grid');
+    if (!videoGrid) return;
+    
+    videoGrid.querySelectorAll('.add-to-playlist-btn').forEach(btn => {
+        // Remove existing listeners to avoid duplicates
+        const newBtn = btn.cloneNode(true);
+        btn.parentNode.replaceChild(newBtn, btn);
+        
+        newBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const videoId = parseInt(newBtn.dataset.videoId);
+            const videoName = newBtn.dataset.videoName;
+            if (window.showAddToPlaylistModal) {
+                window.showAddToPlaylistModal(videoId, videoName);
+            }
+        });
+    });
+}
+
+// Setup listeners on initial load and after new content is added
+document.addEventListener('DOMContentLoaded', () => {
+    // Watch for changes to video-grid and attach handlers
+    const videoGrid = document.getElementById('video-grid');
+    if (videoGrid) {
+        const observer = new MutationObserver(() => {
+            setupAddToPlaylistButtons();
+        });
+        observer.observe(videoGrid, { childList: true, subtree: true });
+        
+        // Initial setup
+        setupAddToPlaylistButtons();
     }
 });
