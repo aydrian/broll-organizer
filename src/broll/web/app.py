@@ -10,6 +10,7 @@ import json
 import sqlite3
 import threading
 from pathlib import Path
+from typing import Any
 
 from flask import (
     Flask,
@@ -66,7 +67,6 @@ def create_app(drive_path: str) -> Flask:
     app.config["DRIVE_PATH"] = str(drive)
     app.config["DB_PATH"] = str(get_db_path(drive))
     app.config["THUMBS_DIR"] = str(get_thumbs_dir(drive))
-    app.config["SECRET_KEY"] = "broll-local-dev"
 
     # ── Jinja2 filters ──
 
@@ -439,6 +439,203 @@ def create_app(drive_path: str) -> Flask:
         update_video(video["file_path"], updates)
 
         return jsonify({"success": True})
+
+    # ═════════════════════════════════════════════════════════════════
+    # Timeline Routes & API
+    # ═════════════════════════════════════════════════════════════════
+
+    @app.route("/timeline")
+    def timeline_page():
+        """Render the timeline view page."""
+        return render_template("timeline.html")
+
+    @app.route("/timeline/<int:year>")
+    def timeline_year(year: int):
+        """Render the year view page."""
+        return render_template("timeline.html", view="year", year=year)
+
+    @app.route("/timeline/<int:year>/<int:month>")
+    def timeline_month(year: int, month: int):
+        """Render the month view page."""
+        return render_template("timeline.html", view="month", year=year, month=month)
+
+    @app.route("/timeline/<int:year>/<int:month>/<int:day>")
+    def timeline_day(year: int, month: int, day: int):
+        """Render the day view page."""
+        return render_template("timeline.html", view="day", year=year, month=month, day=day)
+
+    @app.route("/api/timeline/years")
+    def api_timeline_years():
+        """
+        Get all years with video counts for the year overview.
+        """
+        from ..db import Database
+        
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+        
+        try:
+            years = db.get_years_with_counts()
+            date_range = db.get_date_range()
+            
+            return jsonify({
+                "years": years,
+                "date_range": date_range,
+                "total": len(years)
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching timeline years: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/timeline/year/<int:year>")
+    def api_timeline_year(year: int):
+        """
+        Get activity data for a specific year (heatmap data).
+        """
+        from ..db import Database
+        
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+        
+        try:
+            activity = db.get_year_activity_heatmap(year)
+            
+            # Calculate stats
+            total_videos = sum(day["count"] for day in activity)
+            active_days = len(activity)
+            
+            return jsonify({
+                "year": year,
+                "activity": activity,
+                "total_videos": total_videos,
+                "active_days": active_days
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching year activity: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/timeline/month/<int:year>/<int:month>")
+    def api_timeline_month(year: int, month: int):
+        """
+        Get video counts for each day in a specific month.
+        """
+        from ..db import Database
+        
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+        
+        try:
+            days = db.get_month_grid(year, month)
+            
+            # Build lookup for quick access
+            day_lookup = {d["day"]: d for d in days}
+            
+            return jsonify({
+                "year": year,
+                "month": month,
+                "days": day_lookup,
+                "total_days_with_videos": len(days)
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching month data: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/timeline/day/<int:year>/<int:month>/<int:day>")
+    def api_timeline_day(year: int, month: int, day: int):
+        """
+        Get all videos for a specific date.
+        """
+        from ..db import Database
+        
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+        
+        try:
+            date_str = f"{year}-{month:02d}-{day:02d}"
+            videos = db.get_videos_by_date(date_str)
+            
+            # Add thumbnail URLs
+            for video in videos:
+                if video.get("file_hash"):
+                    video["thumbnail_url"] = f"/thumbnail/{video['file_hash']}"
+                else:
+                    video["thumbnail_url"] = None
+            
+            return jsonify({
+                "date": date_str,
+                "year": year,
+                "month": month,
+                "day": day,
+                "videos": videos,
+                "total": len(videos)
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching day videos: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/timeline/on-this-day")
+    def api_timeline_on_this_day():
+        """
+        Get videos from the same month/day across different years.
+        Query params: month, day, exclude_year (optional)
+        """
+        from ..db import Database
+        
+        try:
+            month = request.args.get("month", type=int)
+            day = request.args.get("day", type=int)
+            exclude_year = request.args.get("exclude_year", type=int)
+            
+            if month is None or day is None:
+                return jsonify({"error": "month and day parameters are required"}), 400
+            
+            if not (1 <= month <= 12) or not (1 <= day <= 31):
+                return jsonify({"error": "Invalid month or day"}), 400
+            
+            db_path = current_app.config["DB_PATH"]
+            db = Database(db_path)
+            
+            try:
+                videos = db.get_on_this_day(month, day, exclude_year)
+                
+                # Add thumbnail URLs
+                for video in videos:
+                    if video.get("file_hash"):
+                        video["thumbnail_url"] = f"/thumbnail/{video['file_hash']}"
+                    else:
+                        video["thumbnail_url"] = None
+                
+                # Group by year
+                by_year = {}
+                for video in videos:
+                    year = video.get("year", "Unknown")
+                    if year not in by_year:
+                        by_year[year] = []
+                    by_year[year].append(video)
+                
+                return jsonify({
+                    "month": month,
+                    "day": day,
+                    "exclude_year": exclude_year,
+                    "videos": videos,
+                    "by_year": by_year,
+                    "total": len(videos),
+                    "year_count": len(by_year)
+                })
+            finally:
+                db.close()
+                
+        except Exception as e:
+            current_app.logger.error(f"Error fetching on-this-day videos: {e}")
+            return jsonify({"error": str(e)}), 500
 
     # ═════════════════════════════════════════════════════════════════
     # Map Routes & API

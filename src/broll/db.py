@@ -191,6 +191,46 @@ class Database:
             )
         """)
 
+        # ---- Playlist tables ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS playlists (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL,
+                description     TEXT,
+                color           TEXT DEFAULT '#3b82f6',
+                created_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS playlist_items (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id     INTEGER NOT NULL,
+                video_id        INTEGER NOT NULL,
+                position        INTEGER NOT NULL,
+                added_at        TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+                FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+                UNIQUE(playlist_id, video_id)
+            )
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id 
+            ON playlist_items(playlist_id)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_playlist_items_video_id 
+            ON playlist_items(video_id)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_playlist_items_position 
+            ON playlist_items(playlist_id, position)
+        """)
+
         conn.commit()
         print(f"✅ Database initialized at {self.db_path}")
 
@@ -443,6 +483,178 @@ class Database:
         ).fetchall()
         
         return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Timeline / Date-based queries
+    # ------------------------------------------------------------------
+
+    def get_years_with_counts(self) -> list[dict[str, Any]]:
+        """
+        Get all years that have videos, with video counts and activity data.
+        
+        Returns list of dicts with year, count, and total_seconds.
+        """
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT 
+                strftime('%Y', creation_date) as year,
+                COUNT(*) as count,
+                COALESCE(SUM(duration_seconds), 0) as total_seconds
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+            GROUP BY year
+            ORDER BY year DESC
+            """
+        ).fetchall()
+        
+        return [
+            {
+                "year": row[0],
+                "count": row[1],
+                "total_seconds": row[2]
+            }
+            for row in rows
+        ]
+
+    def get_year_activity_heatmap(self, year: int) -> list[dict[str, Any]]:
+        """
+        Get daily video counts for a year (for heatmap visualization).
+        
+        Returns list of dicts with date and count for each day with videos.
+        """
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT 
+                strftime('%Y-%m-%d', creation_date) as date,
+                COUNT(*) as count,
+                COALESCE(SUM(duration_seconds), 0) as total_seconds
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+              AND strftime('%Y', creation_date) = ?
+            GROUP BY date
+            ORDER BY date
+            """,
+            (str(year),)
+        ).fetchall()
+        
+        return [
+            {
+                "date": row[0],
+                "count": row[1],
+                "total_seconds": row[2]
+            }
+            for row in rows
+        ]
+
+    def get_month_grid(self, year: int, month: int) -> list[dict[str, Any]]:
+        """
+        Get video counts for each day in a specific month.
+        
+        Returns list of dicts with day, count, and total_seconds.
+        """
+        conn = self.connect()
+        # Pad month with leading zero if needed
+        month_str = f"{year}-{month:02d}"
+        
+        rows = conn.execute(
+            """
+            SELECT 
+                CAST(strftime('%d', creation_date) AS INTEGER) as day,
+                COUNT(*) as count,
+                COALESCE(SUM(duration_seconds), 0) as total_seconds
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+              AND strftime('%Y-%m', creation_date) = ?
+            GROUP BY day
+            ORDER BY day
+            """,
+            (month_str,)
+        ).fetchall()
+        
+        return [
+            {
+                "day": row[0],
+                "count": row[1],
+                "total_seconds": row[2]
+            }
+            for row in rows
+        ]
+
+    def get_videos_by_date(self, date_str: str) -> list[dict[str, Any]]:
+        """
+        Get all videos for a specific date (YYYY-MM-DD format).
+        
+        Returns list of video dicts.
+        """
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT * FROM videos 
+            WHERE creation_date IS NOT NULL
+              AND strftime('%Y-%m-%d', creation_date) = ?
+            ORDER BY file_name
+            """,
+            (date_str,)
+        ).fetchall()
+        
+        return [dict(row) for row in rows]
+
+    def get_on_this_day(self, month: int, day: int, exclude_year: int | None = None) -> list[dict[str, Any]]:
+        """
+        Get videos from the same month/day across different years.
+        
+        Args:
+            month: Month number (1-12)
+            day: Day of month (1-31)
+            exclude_year: Optional year to exclude (e.g., current year)
+            
+        Returns list of video dicts with year info.
+        """
+        conn = self.connect()
+        
+        sql = """
+            SELECT *, strftime('%Y', creation_date) as year
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+              AND CAST(strftime('%m', creation_date) AS INTEGER) = ?
+              AND CAST(strftime('%d', creation_date) AS INTEGER) = ?
+        """
+        params = [month, day]
+        
+        if exclude_year:
+            sql += " AND strftime('%Y', creation_date) != ?"
+            params.append(str(exclude_year))
+        
+        sql += " ORDER BY year DESC, file_name"
+        
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_date_range(self) -> dict[str, str] | None:
+        """
+        Get the earliest and latest dates in the catalog.
+        
+        Returns dict with 'earliest' and 'latest' dates, or None if no dates.
+        """
+        conn = self.connect()
+        row = conn.execute(
+            """
+            SELECT 
+                MIN(creation_date) as earliest,
+                MAX(creation_date) as latest
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+            """
+        ).fetchone()
+        
+        if row and row[0] and row[1]:
+            return {
+                "earliest": row[0],
+                "latest": row[1]
+            }
+        return None
 
     # ------------------------------------------------------------------
     # Write operations
@@ -926,3 +1138,196 @@ class Database:
             })
         
         return locations
+
+    # ------------------------------------------------------------------
+    # Playlist operations
+    # ------------------------------------------------------------------
+
+    def create_playlist(self, name: str, description: str = None, color: str = "#3b82f6") -> int:
+        """Create a new playlist and return its ID."""
+        conn = self.connect()
+        cursor = conn.execute(
+            """
+            INSERT INTO playlists (name, description, color)
+            VALUES (?, ?, ?)
+            """,
+            (name, description, color)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_playlist(self, playlist_id: int) -> dict[str, Any] | None:
+        """Get a single playlist by ID."""
+        conn = self.connect()
+        row = conn.execute(
+            """
+            SELECT p.*, COUNT(pi.id) as video_count
+            FROM playlists p
+            LEFT JOIN playlist_items pi ON p.id = pi.playlist_id
+            WHERE p.id = ?
+            GROUP BY p.id
+            """,
+            (playlist_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_all_playlists(self) -> list[dict[str, Any]]:
+        """Get all playlists with video counts."""
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT p.*, COUNT(pi.id) as video_count
+            FROM playlists p
+            LEFT JOIN playlist_items pi ON p.id = pi.playlist_id
+            GROUP BY p.id
+            ORDER BY p.updated_at DESC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_playlist(self, playlist_id: int, updates: dict[str, Any]):
+        """Update playlist fields."""
+        conn = self.connect()
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+        sql = f"UPDATE playlists SET {set_clause} WHERE id = ?"
+        conn.execute(sql, list(updates.values()) + [playlist_id])
+        conn.commit()
+
+    def delete_playlist(self, playlist_id: int):
+        """Delete a playlist and all its items."""
+        conn = self.connect()
+        conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+        conn.commit()
+
+    def add_video_to_playlist(self, playlist_id: int, video_id: int, position: int = None) -> int:
+        """Add a video to a playlist. Returns the item ID."""
+        conn = self.connect()
+        
+        if position is None:
+            # Get next position
+            row = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM playlist_items WHERE playlist_id = ?",
+                (playlist_id,)
+            ).fetchone()
+            position = row[0]
+        
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO playlist_items (playlist_id, video_id, position)
+                VALUES (?, ?, ?)
+                """,
+                (playlist_id, video_id, position)
+            )
+            conn.execute(
+                "UPDATE playlists SET updated_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), playlist_id)
+            )
+            conn.commit()
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            # Video already in playlist
+            return None
+
+    def remove_video_from_playlist(self, playlist_id: int, video_id: int):
+        """Remove a video from a playlist."""
+        conn = self.connect()
+        conn.execute(
+            "DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+            (playlist_id, video_id)
+        )
+        conn.execute(
+            "UPDATE playlists SET updated_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), playlist_id)
+        )
+        conn.commit()
+
+    def get_playlist_items(self, playlist_id: int) -> list[dict[str, Any]]:
+        """Get all videos in a playlist with their positions."""
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT v.*, pi.position, pi.added_at as item_added_at, pi.id as item_id
+            FROM playlist_items pi
+            JOIN videos v ON pi.video_id = v.id
+            WHERE pi.playlist_id = ?
+            ORDER BY pi.position
+            """,
+            (playlist_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def reorder_playlist_item(self, playlist_id: int, video_id: int, new_position: int):
+        """Move a video to a new position in the playlist."""
+        conn = self.connect()
+        
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            # Get current position
+            row = conn.execute(
+                "SELECT position FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+                (playlist_id, video_id)
+            ).fetchone()
+            
+            if not row:
+                conn.execute("ROLLBACK")
+                return
+            
+            old_position = row[0]
+            
+            if old_position == new_position:
+                conn.execute("ROLLBACK")
+                return
+            
+            if old_position < new_position:
+                # Moving down: decrement positions between old and new
+                conn.execute(
+                    """
+                    UPDATE playlist_items
+                    SET position = position - 1
+                    WHERE playlist_id = ? AND position > ? AND position <= ?
+                    """,
+                    (playlist_id, old_position, new_position)
+                )
+            else:
+                # Moving up: increment positions between new and old
+                conn.execute(
+                    """
+                    UPDATE playlist_items
+                    SET position = position + 1
+                    WHERE playlist_id = ? AND position >= ? AND position < ?
+                    """,
+                    (playlist_id, new_position, old_position)
+                )
+            
+            # Update the moved item
+            conn.execute(
+                "UPDATE playlist_items SET position = ? WHERE playlist_id = ? AND video_id = ?",
+                (new_position, playlist_id, video_id)
+            )
+            
+            conn.execute(
+                "UPDATE playlists SET updated_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), playlist_id)
+            )
+            
+            conn.commit()
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def get_playlists_containing_video(self, video_id: int) -> list[dict[str, Any]]:
+        """Get all playlists that contain a specific video."""
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT p.*, pi.position
+            FROM playlists p
+            JOIN playlist_items pi ON p.id = pi.playlist_id
+            WHERE pi.video_id = ?
+            ORDER BY p.name
+            """,
+            (video_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
