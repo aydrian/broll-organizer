@@ -49,7 +49,7 @@ ANALYSIS_PROMPT = (
     '- Setting type (e.g. "beach", "urban", "forest", "restaurant", "market")\n'
     '- Visual qualities (e.g. "bokeh", "silhouette", "reflections", "lens flare")\n'
     '- Weather/atmosphere (e.g. "sunny", "foggy", "rainy", "cloudy")\n'
-    '- Colors (e.g. "warm tones", "blue", "neon", "muted colors")\n\n"
+    '- Colors (e.g. "warm tones", "blue", "neon", "muted colors")\n\n'
     "Be specific and practical - a video editor needs to find this clip quickly."
 )
 
