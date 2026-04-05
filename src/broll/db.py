@@ -195,6 +195,36 @@ class Database:
         print(f"✅ Database initialized at {self.db_path}")
 
     # ------------------------------------------------------------------
+    # Schema migration
+    # ------------------------------------------------------------------
+
+    def migrate(self):
+        """Run any pending migrations to update schema."""
+        conn = self.connect()
+        
+        # Get existing columns
+        cursor = conn.execute("PRAGMA table_info(videos)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        
+        # Add folder_location column if not exists
+        if "folder_location" not in existing_columns:
+            conn.execute("ALTER TABLE videos ADD COLUMN folder_location TEXT")
+            print("✓ Added folder_location column")
+        
+        # Add gps_accuracy column if not exists
+        if "gps_accuracy" not in existing_columns:
+            conn.execute("ALTER TABLE videos ADD COLUMN gps_accuracy REAL")
+            print("✓ Added gps_accuracy column")
+        
+        # Add location_source column if not exists
+        if "location_source" not in existing_columns:
+            conn.execute("ALTER TABLE videos ADD COLUMN location_source TEXT DEFAULT 'folder'")
+            print("✓ Added location_source column")
+        
+        conn.commit()
+        print("✅ Database migration complete")
+
+    # ------------------------------------------------------------------
     # Read operations
     # ------------------------------------------------------------------
 
@@ -359,6 +389,61 @@ class Database:
         ).fetchone()[0]
         return stats
 
+    def nearby_videos(
+        self, 
+        lat: float, 
+        lon: float, 
+        radius_km: float = 5.0,
+        limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """
+        Find videos within a radius using Haversine formula.
+        
+        Args:
+            lat: Center latitude
+            lon: Center longitude  
+            radius_km: Search radius in kilometers (default: 5.0)
+            limit: Maximum results to return
+            
+        Returns:
+            List of video dicts with 'distance_km' field added
+        """
+        import math
+        
+        conn = self.connect()
+        
+        # Haversine formula components
+        # Using SQLite math functions for calculation
+        # 6371 is Earth's radius in kilometers
+        
+        rows = conn.execute(
+            """
+            SELECT *,
+                (6371 * acos(
+                    cos(radians(?)) * 
+                    cos(radians(COALESCE(gps_latitude, 0))) * 
+                    cos(radians(COALESCE(gps_longitude, 0)) - radians(?)) + 
+                    sin(radians(?)) * 
+                    sin(radians(COALESCE(gps_latitude, 0)))
+                )) AS distance_km
+            FROM videos
+            WHERE gps_latitude IS NOT NULL 
+              AND gps_longitude IS NOT NULL
+              AND (6371 * acos(
+                    cos(radians(?)) * 
+                    cos(radians(gps_latitude)) * 
+                    cos(radians(gps_longitude) - radians(?)) + 
+                    sin(radians(?)) * 
+                    sin(radians(gps_latitude))
+                )) <= ?
+            ORDER BY distance_km
+            LIMIT ?
+            """,
+            (lat, lon, lat, lat, lon, lat, radius_km, limit)
+        ).fetchall()
+        
+        return [dict(row) for row in rows]
+
     # ------------------------------------------------------------------
     # Write operations
     # ------------------------------------------------------------------
@@ -380,13 +465,15 @@ class Database:
             INSERT INTO videos (
                 file_path, file_name, file_size, file_hash, source_device, lrf_path,
                 duration_seconds, resolution, width, height, fps, codec, creation_date,
-                gps_latitude, gps_longitude, gps_location_name,
+                gps_latitude, gps_longitude, gps_location_name, folder_location,
+                gps_accuracy, location_source,
                 scene_description, tags, mood, camera_movement, time_of_day,
                 thumbnail_path, processed_at
             ) VALUES (
                 :file_path, :file_name, :file_size, :file_hash, :source_device, :lrf_path,
                 :duration_seconds, :resolution, :width, :height, :fps, :codec, :creation_date,
-                :gps_latitude, :gps_longitude, :gps_location_name,
+                :gps_latitude, :gps_longitude, :gps_location_name, :folder_location,
+                :gps_accuracy, :location_source,
                 :scene_description, :tags, :mood, :camera_movement, :time_of_day,
                 :thumbnail_path, :processed_at
             )
@@ -408,6 +495,9 @@ class Database:
                 "gps_latitude": video.get("gps_latitude"),
                 "gps_longitude": video.get("gps_longitude"),
                 "gps_location_name": video.get("gps_location_name"),
+                "folder_location": video.get("folder_location"),
+                "gps_accuracy": video.get("gps_accuracy"),
+                "location_source": video.get("location_source", "folder"),
                 "scene_description": video.get("scene_description"),
                 "tags": tags,
                 "mood": video.get("mood"),
@@ -444,6 +534,46 @@ class Database:
         conn.execute(
             f"UPDATE videos SET {set_clause} WHERE file_path = :_file_path",
             updates,
+        )
+        conn.commit()
+
+    def update_video_location(
+        self, 
+        video_id: int, 
+        lat: float, 
+        lon: float,
+        location_name: str | None = None,
+        accuracy: float | None = None
+    ):
+        """
+        Update GPS coordinates for a video (manual override).
+        
+        Args:
+            video_id: The video ID
+            lat: Latitude
+            lon: Longitude
+            location_name: Optional location name
+            accuracy: Optional accuracy in meters
+        """
+        conn = self.connect()
+        
+        updates = {
+            "gps_latitude": lat,
+            "gps_longitude": lon,
+            "location_source": "manual"
+        }
+        
+        if location_name:
+            updates["gps_location_name"] = location_name
+        if accuracy is not None:
+            updates["gps_accuracy"] = accuracy
+            
+        set_clause = ", ".join(f"{key} = ?" for key in updates.keys())
+        values = list(updates.values()) + [video_id]
+        
+        conn.execute(
+            f"UPDATE videos SET {set_clause} WHERE id = ?",
+            values,
         )
         conn.commit()
 
