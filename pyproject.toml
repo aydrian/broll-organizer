@@ -1,11 +1,12 @@
 [project]
 name = "broll-organizer"
 version = "0.1.0"
-description = "AI-powered b-roll organizer using local LLMs via Ollama"
+description = "AI-powered b-roll organizer using Fireworks AI (with Ollama fallback)"
 requires-python = ">=3.12"
 dependencies = [
     "click>=8.1",
     "ffmpeg-python>=0.2",
+    "fireworks-ai>=0.15",
     "flask>=3.1",
     "ollama>=0.4",
     "pillow>=11.0",

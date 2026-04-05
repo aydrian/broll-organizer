@@ -1,75 +1,138 @@
-# src/broll/embeddings.py
-'''
-Vector embedding generation using Ollama&#x27;s embedding models.
+"""
+Vector embedding generation using Fireworks AI or Ollama embedding models.
 
 Converts video descriptions and tags into 768-dimensional vectors
 for semantic similarity search via sqlite-vec.
-'''
+"""
 from __future__ import annotations
 
-import ollama
+import os
+from typing import TYPE_CHECKING
 
-from .config import EMBEDDING_MODEL
+from .config import (
+    AI_PROVIDER,
+    EMBEDDING_DIMENSIONS,
+    FIREWORKS_EMBEDDING_MODEL,
+    OLLAMA_EMBEDDING_MODEL,
+)
+
+if TYPE_CHECKING:
+    pass
+
+# Try to import providers
+fireworks_client = None
+ollama = None
+
+if AI_PROVIDER == "fireworks":
+    try:
+        from fireworks.client import Fireworks
+
+        fireworks_client = Fireworks(api_key=os.environ.get("FIREWORKS_API_KEY"))
+    except ImportError:
+        pass
+else:
+    try:
+        import ollama
+    except ImportError:
+        pass
 
 
 def generate_embedding(text: str) -> list[float]:
-    '''
+    """
     Generate a vector embedding for the given text.
 
-    Uses nomic-embed-text via Ollama to produce a 768-dimensional vector.
-    '''
+    Uses nomic-embed-text via Fireworks or Ollama to produce a 768-dimensional vector.
+    """
     if not text or not text.strip():
-        raise ValueError('Cannot generate embedding for empty text')
+        raise ValueError("Cannot generate embedding for empty text")
 
-    response = ollama.embed(
-        model=EMBEDDING_MODEL,
-        input=text.strip(),
+    if AI_PROVIDER == "fireworks":
+        return _generate_embedding_fireworks(text.strip())
+    else:
+        return _generate_embedding_ollama(text.strip())
+
+
+def _generate_embedding_fireworks(text: str) -> list[float]:
+    """Generate embedding using Fireworks AI."""
+    if fireworks_client is None:
+        raise RuntimeError("Fireworks client not available")
+
+    response = fireworks_client.embeddings.create(
+        model=FIREWORKS_EMBEDDING_MODEL,
+        input=[text],
     )
 
-    embeddings = response.get('embeddings')
+    embeddings = response.data
+    if not embeddings or not embeddings[0].embedding:
+        raise RuntimeError(f"Fireworks returned empty embeddings for model {FIREWORKS_EMBEDDING_MODEL}")
+
+    return embeddings[0].embedding
+
+
+def _generate_embedding_ollama(text: str) -> list[float]:
+    """Generate embedding using local Ollama."""
+    if ollama is None:
+        raise RuntimeError("Ollama not available")
+
+    response = ollama.embed(
+        model=OLLAMA_EMBEDDING_MODEL,
+        input=text,
+    )
+
+    embeddings = response.get("embeddings")
     if not embeddings or not embeddings[0]:
-        raise RuntimeError(f'Ollama returned empty embeddings for model {EMBEDDING_MODEL}')
+        raise RuntimeError(f"Ollama returned empty embeddings for model {OLLAMA_EMBEDDING_MODEL}")
 
     return embeddings[0]
 
 
 def build_searchable_text(video: dict) -> str:
-    '''
+    """
     Combine all descriptive fields from a video record into a single
     string optimized for embedding generation.
-    '''
+    """
     parts: list[str] = []
 
-    desc = video.get('scene_description')
+    desc = video.get("scene_description")
     if desc:
         parts.append(desc)
 
-    tags = video.get('tags')
+    tags = video.get("tags")
     if isinstance(tags, list):
-        parts.append(' '.join(tags))
+        parts.append(" ".join(tags))
     elif isinstance(tags, str):
         parts.append(tags)
 
-    mood = video.get('mood')
-    if mood and mood != 'unknown':
-        parts.append(f'mood: {mood}')
+    mood = video.get("mood")
+    if mood and mood != "unknown":
+        parts.append(f"mood: {mood}")
 
-    movement = video.get('camera_movement')
-    if movement and movement != 'unknown':
-        parts.append(f'camera: {movement}')
+    movement = video.get("camera_movement")
+    if movement and movement != "unknown":
+        parts.append(f"camera: {movement}")
 
-    time_of_day = video.get('time_of_day')
-    if time_of_day and time_of_day != 'unknown':
-        parts.append(f'time: {time_of_day}')
+    time_of_day = video.get("time_of_day")
+    if time_of_day and time_of_day != "unknown":
+        parts.append(f"time: {time_of_day}")
 
-    location = video.get('gps_location_name')
+    location = video.get("gps_location_name")
     if location:
-        parts.append(f'location: {location}')
+        parts.append(f"location: {location}")
 
-    device = video.get('source_device')
-    if device == 'dji_pocket3':
-        parts.append('gimbal camera')
-    elif device == 'iphone':
-        parts.append('smartphone camera')
+    # Infer location from folder path if not in gps_location_name
+    file_path = video.get("file_path", "")
+    if not location and file_path:
+        # Extract folder names like "01 Kusatsu Onsen" from paths
+        import re
 
-    return ' | '.join(parts)
+        match = re.search(r"/\d+\s+([^/]+)/", file_path)
+        if match:
+            parts.append(f"location: {match.group(1)}")
+
+    device = video.get("source_device")
+    if device == "dji_pocket3":
+        parts.append("gimbal camera")
+    elif device == "iphone":
+        parts.append("smartphone camera")
+
+    return " | ".join(parts)

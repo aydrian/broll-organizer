@@ -1,0 +1,9 @@
+.broll/
+__pycache__/
+*.pyc
+.env
+.venv/
+*.db
+*.mp4
+*.mov
+.DS_Store

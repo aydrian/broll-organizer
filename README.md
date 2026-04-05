@@ -1,41 +1,57 @@
 # 🎬 B-Roll Organizer
 
-AI-powered b-roll organizer using local LLMs via Ollama.
+AI-powered b-roll organizer using **Fireworks AI** (with Ollama fallback for local-only use).
 
 ## Overview
 
-`broll-organizer` is an AI-powered video cataloging tool designed to organize and search large collections of b-roll footage stored on external drives. It uses local, open-source Large Language Models (LLMs) via Ollama to automatically analyze, tag, and describe video clips, making them searchable through natural language.
+`broll-organizer` is an AI-powered video cataloging tool designed to organize and search large collections of b-roll footage stored on external drives. It uses Large Language Models (LLMs) to automatically analyze, tag, and describe video clips, making them searchable through natural language.
 
-The project has two main interfaces:
+The project has three main interfaces:
 1.  A **Command-Line Interface (CLI)** for initializing the catalog, processing videos, and performing searches.
 2.  A **Web Interface (Flask)** for visually browsing the catalog, searching for clips, viewing video details, and using a chatbot to query the collection.
+3.  An **OpenClaw Agent API** for programmatic access by AI assistants.
 
 ## Key Technologies
 
-*   **Backend:** Python
+*   **Backend:** Python 3.12+
 *   **CLI:** `click`
 *   **Web Framework:** `flask`
 *   **Video Processing:** `ffmpeg-python`
 *   **Image Processing:** `pillow`
 *   **Database:** SQLite with vector support via `sqlite-vec` for semantic search.
-*   **AI/ML:** Local LLMs via `ollama`. The specific models used are:
-    *   **Vision Analysis:** `minicpm-v`
-    *   **Embeddings:** `nomic-embed-text`
-    *   **Chat:** `gemma3:4b`
-*   **Geocoding:** `reverse-geocoder` to get location names from GPS data in video metadata.
+*   **AI/ML:** [Fireworks AI](https://fireworks.ai/) for fast, high-quality inference (or local Ollama as fallback)
+    *   **Vision Analysis:** `kimi-k2p5-turbo` (multimodal)
+    *   **Embeddings:** `nomic-embed-text-v1.5`
+    *   **Chat:** `kimi-k2p5-turbo`
+*   **Folder-based location:** Since devices like Osmo Pocket 3 don't encode GPS, location is inferred from folder names.
 
-## Ollama Setup
+## AI Provider Setup
 
-This project uses **[Ollama](https://ollama.com/)** to run the local LLMs.
+### Option 1: Fireworks AI (Recommended)
 
-1.  **Install Ollama:** Download and install via [ollama.com](https://ollama.com/).
-2.  **Pull Required Models:** Run the following commands to download the models used by the app:
+Set your Fireworks API key as an environment variable:
+
+```bash
+export FIREWORKS_API_KEY="your-api-key-here"
+```
+
+The app defaults to Fireworks mode when `AI_PROVIDER=fireworks` (or unset).
+
+### Option 2: Ollama (Local-only)
+
+For offline use, install [Ollama](https://ollama.com/):
+
+1.  **Install Ollama:** Download via [ollama.com](https://ollama.com/)
+2.  **Pull Required Models:**
     ```bash
-    ollama pull minicpm-v
-    ollama pull nomic-embed-text
-    ollama pull gemma3:4b
+    ollama pull minicpm-v      # Vision analysis
+    ollama pull nomic-embed-text  # Embeddings
+    ollama pull gemma3:4b      # Chat
     ```
-3.  **Start Server:** Ensure the Ollama app is running in the background.
+3.  **Set Provider:**
+    ```bash
+    export AI_PROVIDER=ollama
+    ```
 
 ## Installation
 
@@ -82,6 +98,12 @@ uv run broll process /path/to/your/external-drive
     uv run broll stats /path/to/drive
     ```
 
+*   **OpenClaw Agent Mode:** Launch the agent API for AI assistant integration.
+    ```bash
+    uv run broll agent /path/to/drive
+    ```
+    The agent API will be available at `http://127.0.0.1:5556`.
+
 ### Web UI
 
 *   Launch the web interface to browse and search the catalog visually.
@@ -89,6 +111,34 @@ uv run broll process /path/to/your/external-drive
     uv run broll web /path/to/drive
     ```
     The web UI will be available at `http://127.0.0.1:5555` by default.
+
+## OpenClaw Skill
+
+This repo includes an OpenClaw skill for easy AI assistant integration:
+
+```bash
+# Install the skill via npx
+npx openclaw skills add aydrian/broll-organizer/skills/broll-catalog
+```
+
+Once installed, OpenClaw agents can query your B-roll catalog directly:
+- Search by keyword, location, mood
+- Get video details and thumbnails
+- Find clips for content creation
+
+See [skills/broll-catalog/SKILL.md](skills/broll-catalog/SKILL.md) for details.
+
+## Configuration
+
+Environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `AI_PROVIDER` | AI backend to use: `fireworks` or `ollama` | `fireworks` |
+| `FIREWORKS_API_KEY` | Your Fireworks API key | (required for Fireworks) |
+| `FIREWORKS_VISION_MODEL` | Vision model identifier | `accounts/fireworks/models/kimi-k2p5-turbo` |
+| `FIREWORKS_CHAT_MODEL` | Chat model identifier | `accounts/fireworks/models/kimi-k2p5-turbo` |
+| `FIREWORKS_EMBEDDING_MODEL` | Embedding model identifier | `accounts/fireworks/models/nomic-embed-text-v1.5` |
 
 ## License
 

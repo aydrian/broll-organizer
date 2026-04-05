@@ -9,7 +9,7 @@ import click
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import get_db_path, get_thumbs_dir, WEB_HOST, WEB_PORT
+from .config import get_db_path, get_thumbs_dir, WEB_HOST, WEB_PORT, AGENT_API_HOST, AGENT_API_PORT
 from .db import Database
 
 
@@ -363,6 +363,52 @@ def web(drive_path: str, port: int, host: str):
 
     app.run(host=host, port=port, debug=False)
 
+
+
+@cli.command()
+@click.argument("drive_path", type=click.Path(exists=True, file_okay=False))
+@click.option("--port", default=AGENT_API_PORT, help="Port for the agent API")
+@click.option("--host", default=AGENT_API_HOST, help="Host to bind to")
+def agent(drive_path: str, port: int, host: str):
+    """Launch the OpenClaw Agent API for programmatic access."""
+    from .agent_api import create_agent_app
+
+    drive = Path(drive_path)
+    db_path = get_db_path(drive)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.")
+        raise SystemExit(1)
+
+    app = create_agent_app(drive_path)
+
+    click.echo(f"\nB-Roll Catalog Agent API")
+    click.echo(f"  http://{host}:{port}")
+    click.echo(f"  Database: {db_path}")
+    click.echo(f"\nEndpoints:")
+    click.echo(f"  GET  /health       - Health check")
+    click.echo(f"  GET  /stats        - Catalog statistics")
+    click.echo(f"  GET  /search?q=... - Search videos")
+    click.echo(f"  GET  /videos       - List videos")
+    click.echo(f"  GET  /video/<id>   - Get video details")
+    click.echo(f"  GET  /thumbnail/<id> - Get video thumbnail")
+    click.echo(f"  POST /chat         - Chat with the catalog")
+    click.echo(f"\nPress Ctrl+C to stop\n")
+
+    click.echo(f"\nB-Roll Catalog Agent API")
+    click.echo(f"  http://{host}:{port}")
+    click.echo(f"  Database: {db_path}")
+    click.echo(f"\nEndpoints:")
+    click.echo(f"  GET  /health       - Health check")
+    click.echo(f"  GET  /stats        - Catalog statistics")
+    click.echo(f"  GET  /search?q=... - Search videos")
+    click.echo(f"  GET  /videos       - List videos")
+    click.echo(f"  GET  /video/<id>   - Get video details")
+    click.echo(f"  GET  /thumbnail/<id> - Get video thumbnail")
+    click.echo(f"  POST /chat         - Chat with the catalog")
+    click.echo(f"\nPress Ctrl+C to stop\n")
+
+    app.run(host=host, port=port, debug=False)
 
 
 @cli.command()

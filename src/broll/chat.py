@@ -1,4 +1,3 @@
-# src/broll/chat.py
 """
 Chat interface for the b-roll catalog.
 Uses search results as context for the chat LLM.
@@ -6,12 +5,32 @@ Uses search results as context for the chat LLM.
 from __future__ import annotations
 
 import json
+import os
+from typing import TYPE_CHECKING
 
-import ollama
-
-from .config import CHAT_MODEL
+from .config import AI_PROVIDER, FIREWORKS_CHAT_MODEL, OLLAMA_CHAT_MODEL
 from .search import hybrid_search
-from .db import Database
+
+if TYPE_CHECKING:
+    from .db import Database
+
+
+# Try to import providers
+fireworks_client = None
+ollama = None
+
+if AI_PROVIDER == "fireworks":
+    try:
+        from fireworks.client import Fireworks
+
+        fireworks_client = Fireworks(api_key=os.environ.get("FIREWORKS_API_KEY"))
+    except ImportError:
+        pass
+else:
+    try:
+        import ollama
+    except ImportError:
+        pass
 
 
 SYSTEM_PROMPT = (
@@ -26,7 +45,7 @@ SYSTEM_PROMPT = (
 
 def chat_with_catalog(
     message: str,
-    db: Database,
+    db: "Database",
     history: list[dict] | None = None,
 ) -> dict:
     """
@@ -66,15 +85,10 @@ def chat_with_catalog(
     messages.append({"role": "user", "content": user_content})
 
     try:
-        response = ollama.chat(
-            model=CHAT_MODEL,
-            messages=messages,
-            options={
-                "temperature": 0.7,
-                "num_predict": 2048,
-            },
-        )
-        reply = response["message"]["content"]
+        if AI_PROVIDER == "fireworks":
+            reply = _chat_with_fireworks(messages)
+        else:
+            reply = _chat_with_ollama(messages)
     except Exception as e:
         reply = f"Sorry, I encountered an error talking to the LLM: {e}"
 
@@ -82,6 +96,38 @@ def chat_with_catalog(
         "response": reply,
         "videos": _simplify_videos(context_videos),
     }
+
+
+def _chat_with_fireworks(messages: list[dict]) -> str:
+    """Send messages to Fireworks AI Kimi K2.5 Turbo."""
+    if fireworks_client is None:
+        raise RuntimeError("Fireworks client not available")
+
+    response = fireworks_client.chat.completions.create(
+        model=FIREWORKS_CHAT_MODEL,
+        messages=messages,
+        temperature=0.7,
+        max_tokens=2048,
+    )
+
+    return response.choices[0].message.content or ""
+
+
+def _chat_with_ollama(messages: list[dict]) -> str:
+    """Send messages to local Ollama."""
+    if ollama is None:
+        raise RuntimeError("Ollama not available")
+
+    response = ollama.chat(
+        model=OLLAMA_CHAT_MODEL,
+        messages=messages,
+        options={
+            "temperature": 0.7,
+            "num_predict": 2048,
+        },
+    )
+
+    return response["message"]["content"]
 
 
 def _build_context(videos: list[dict]) -> str:
