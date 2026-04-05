@@ -10,6 +10,13 @@ from pathlib import Path
 
 from .config import get_db_path, get_thumbs_dir, WEB_HOST, WEB_PORT, AGENT_API_HOST, AGENT_API_PORT
 from .db import Database
+from .doctor import (
+    run_health_check,
+    format_text_report,
+    format_json_report,
+    fix_missing_files,
+    fix_orphaned_thumbnails,
+)
 
 
 @click.group()
@@ -436,8 +443,15 @@ def agent(drive_path: str, port: int, host: str):
 
 @cli.command()
 @click.argument("drive_path", type=click.Path(exists=True, file_okay=False))
-def stats(drive_path: str):
+@click.option("--detailed", is_flag=True, help="Show per-location breakdown")
+@click.option("--timeline", is_flag=True, help="Show videos by date histogram")
+@click.option("--missing-metadata", is_flag=True, help="Show videos lacking descriptions/tags")
+@click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format")
+def stats(drive_path: str, detailed: bool, timeline: bool, missing_metadata: bool, output_format: str):
     """Show catalog statistics."""
+    from collections import Counter
+    import json as json_lib
+    
     drive = Path(drive_path)
     db_path = get_db_path(drive)
 
@@ -447,17 +461,201 @@ def stats(drive_path: str):
 
     with Database(db_path) as db:
         s = db.get_catalog_stats()
+        
+        # Build output data structure
+        output = {
+            "summary": {
+                "total_videos": s["total_videos"],
+                "analyzed_count": s["analyzed_count"],
+                "total_with_embeddings": s["total_with_embeddings"],
+                "geotagged_count": s["geotagged_count"],
+                "device_count": s["device_count"],
+                "total_size_gb": round(s["total_size_bytes"] / (1024 ** 3), 2),
+                "total_duration_min": round(s["total_duration_seconds"] / 60, 1),
+            }
+        }
+        
+        # Detailed location breakdown
+        if detailed:
+            all_videos = db.get_all_videos(limit=1000000)
+            
+            # Count by location
+            location_counts = Counter()
+            location_durations = {}
+            for video in all_videos:
+                loc = video.get("gps_location_name") or "Unknown"
+                location_counts[loc] += 1
+                duration = video.get("duration_seconds") or 0
+                location_durations[loc] = location_durations.get(loc, 0) + duration
+            
+            output["locations"] = {
+                loc: {
+                    "count": count,
+                    "duration_min": round(location_durations.get(loc, 0) / 60, 1)
+                }
+                for loc, count in sorted(location_counts.items(), key=lambda x: -x[1])
+            }
+        
+        # Timeline histogram
+        if timeline:
+            all_videos = db.get_all_videos(limit=1000000)
+            
+            # Group by creation date (month)
+            date_counts = Counter()
+            for video in all_videos:
+                creation = video.get("creation_date")
+                if creation:
+                    # Parse ISO date and get year-month
+                    try:
+                        if "T" in creation:
+                            month = creation[:7]  # YYYY-MM
+                        else:
+                            month = creation[:7]
+                        date_counts[month] += 1
+                    except:
+                        date_counts["Unknown"] += 1
+                else:
+                    date_counts["Unknown"] += 1
+            
+            output["timeline"] = dict(sorted(date_counts.items()))
+        
+        # Missing metadata
+        if missing_metadata:
+            all_videos = db.get_all_videos(limit=1000000)
+            
+            missing_list = []
+            for video in all_videos:
+                scene_desc = video.get("scene_description")
+                tags = video.get("tags")
+                is_error = scene_desc and str(scene_desc).startswith("ERROR")
+                
+                if not scene_desc or is_error or not tags:
+                    missing_list.append({
+                        "id": video.get("id"),
+                        "file_path": video.get("file_path"),
+                        "file_name": video.get("file_name"),
+                        "missing_description": not scene_desc or is_error,
+                        "missing_tags": not tags,
+                        "error": is_error,
+                    })
+            
+            output["missing_metadata"] = missing_list
 
-    total_gb = s["total_size_bytes"] / (1024 ** 3)
-    total_min = s["total_duration_seconds"] / 60
+    # Output formatting
+    if output_format == "json":
+        click.echo(json_lib.dumps(output, indent=2))
+    else:
+        # Text format
+        click.echo(f"\nCatalog Statistics")
+        click.echo(f"{'=' * 40}")
+        click.echo(f"  Total videos:       {output['summary']['total_videos']}")
+        click.echo(f"  With AI analysis:   {output['summary']['analyzed_count']}")
+        click.echo(f"  With embeddings:    {output['summary']['total_with_embeddings']}")
+        click.echo(f"  Geotagged:          {output['summary']['geotagged_count']}")
+        click.echo(f"  Source devices:     {output['summary']['device_count']}")
+        click.echo(f"  Total file size:    {output['summary']['total_size_gb']:.2f} GB")
+        click.echo(f"  Total duration:     {output['summary']['total_duration_min']:.1f} min")
+        
+        # Detailed location breakdown
+        if detailed and "locations" in output:
+            click.echo(f"\n{'-' * 40}")
+            click.echo("Location Breakdown:")
+            for loc, data in list(output["locations"].items())[:10]:
+                click.echo(f"  {loc}: {data['count']} videos ({data['duration_min']:.1f} min)")
+            if len(output["locations"]) > 10:
+                click.echo(f"  ... and {len(output['locations']) - 10} more locations")
+        
+        # Timeline
+        if timeline and "timeline" in output:
+            click.echo(f"\n{'-' * 40}")
+            click.echo("Timeline (by month):")
+            for month, count in list(output["timeline"].items())[-12:]:  # Last 12 months
+                click.echo(f"  {month}: {count} videos")
+        
+        # Missing metadata
+        if missing_metadata and "missing_metadata" in output:
+            click.echo(f"\n{'-' * 40}")
+            click.echo(f"Missing Metadata ({len(output['missing_metadata'])} videos):")
+            for video in output["missing_metadata"][:10]:
+                missing = []
+                if video["missing_description"]:
+                    missing.append("description")
+                if video["missing_tags"]:
+                    missing.append("tags")
+                click.echo(f"  {video['file_name']} - missing: {', '.join(missing)}")
+            if len(output["missing_metadata"]) > 10:
+                click.echo(f"  ... and {len(output['missing_metadata']) - 10} more")
+        
+        click.echo()
 
-    click.echo(f"\nCatalog Statistics")
-    click.echo(f"{'=' * 40}")
-    click.echo(f"  Total videos:       {s['total_videos']}")
-    click.echo(f"  With AI analysis:   {s['analyzed_count']}")
-    click.echo(f"  With embeddings:    {s['total_with_embeddings']}")
-    click.echo(f"  Geotagged:          {s['geotagged_count']}")
-    click.echo(f"  Source devices:     {s['device_count']}")
-    click.echo(f"  Total file size:    {total_gb:.2f} GB")
-    click.echo(f"  Total duration:     {total_min:.1f} min")
-    click.echo()
+
+@cli.command()
+@click.argument("drive_path", type=click.Path(exists=True, file_okay=False))
+@click.option("--thumbnails", is_flag=True, help="Check for missing thumbnails")
+@click.option("--orphaned", is_flag=True, help="Check for orphaned thumbnails")
+@click.option("--hashes", is_flag=True, help="Check for hash mismatches")
+@click.option("--fix", is_flag=True, help="Automatically fix issues where possible")
+@click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format")
+@click.option("--all", "check_all", is_flag=True, help="Run all checks (default behavior)")
+def doctor(drive_path: str, thumbnails: bool, orphaned: bool, hashes: bool, fix: bool, output_format: str, check_all: bool):
+    """Run health checks on the catalog database."""
+    drive = Path(drive_path)
+    db_path = get_db_path(drive)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.")
+        raise SystemExit(1)
+
+    # Default to all checks if no specific checks requested
+    run_all = check_all or not (thumbnails or orphaned or hashes)
+    
+    with Database(db_path) as db:
+        click.echo("Running health checks...")
+        report = run_health_check(
+            db=db,
+            drive_path=drive,
+            check_thumbnails=run_all or thumbnails,
+            check_orphaned=run_all or orphaned,
+            check_hashes=run_all or hashes,
+            check_all=run_all,
+        )
+        
+        # Auto-fix if requested
+        if fix:
+            click.echo("\nApplying fixes...")
+            
+            # Fix missing files (remove DB entries for non-existent files)
+            missing_file_issues = [i for i in report.issues if i.type == "missing_file"]
+            if missing_file_issues:
+                fixed = fix_missing_files(db, missing_file_issues, dry_run=False)
+                click.echo(f"  Removed {fixed} database entries for missing files")
+            
+            # Fix orphaned thumbnails (delete files)
+            orphaned_issues = [i for i in report.issues if i.type == "orphaned_thumbnail"]
+            if orphaned_issues:
+                fixed = fix_orphaned_thumbnails(orphaned_issues, drive, dry_run=False)
+                click.echo(f"  Deleted {fixed} orphaned thumbnail files")
+            
+            # Re-run check to get updated report
+            if missing_file_issues or orphaned_issues:
+                click.echo("\nRe-running checks after fixes...")
+                report = run_health_check(
+                    db=db,
+                    drive_path=drive,
+                    check_thumbnails=run_all or thumbnails,
+                    check_orphaned=run_all or orphaned,
+                    check_hashes=run_all or hashes,
+                    check_all=run_all,
+                )
+        
+        # Output report
+        if output_format == "json":
+            click.echo(format_json_report(report, drive))
+        else:
+            click.echo(format_text_report(report, drive))
+    
+    # Exit with appropriate code
+    if report.healthy:
+        raise SystemExit(0)
+    else:
+        raise SystemExit(1)
