@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-05
+
+### Added
+- Systemd service for auto-start on boot (`systemd/broll-catalog.service`)
+- Install script for easy service setup (`systemd/install.sh`)
+- Drive disconnection handling with friendly error page
+- Graceful handling when external SSD is unplugged/plugged in
+- Template `drive_not_connected.html` for offline drive status
+
+### Changed
+- Moved project to `/home/openclaw/apps/broll-organizer`
+- Web UI now detects drive connection status before each request
+- API returns 503 with JSON error when drive is offline
+
+### Fixed
+- Folder display bug: video files no longer appear as folders
+- Merge conflicts in PR #9 resolved
+- All code review issues addressed (#1, #2, #3, #4, #5, #6)
+
 ## [0.2.3] - 2026-04-05
 
 ### Fixed

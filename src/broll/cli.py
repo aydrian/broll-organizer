@@ -13,7 +13,7 @@ from .db import Database
 
 
 @click.group()
-@click.version_option(version='0.2.3')
+@click.version_option(version='0.3.0')
 def cli():
     '''B-Roll Organizer - AI-powered video catalog using local LLMs.'''
     pass
