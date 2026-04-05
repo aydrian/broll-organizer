@@ -440,6 +440,219 @@ def create_app(drive_path: str) -> Flask:
 
         return jsonify({"success": True})
 
+    # ═════════════════════════════════════════════════════════════════
+    # Map Routes & API
+    # ═════════════════════════════════════════════════════════════════
+
+    @app.route("/map")
+    def map_page():
+        """Render the map view page."""
+        return render_template("map.html")
+
+    @app.route("/api/map/videos")
+    def api_map_videos():
+        """
+        Get all videos with coordinates for the map.
+        Returns videos with GPS coordinates or folder locations that have been geocoded.
+        """
+        from ..db import Database
+        
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+        
+        try:
+            videos = db.get_videos_with_coordinates(include_folder_locations=True)
+            
+            # Add thumbnail URLs
+            for video in videos:
+                if video.get("file_hash"):
+                    video["thumbnail_url"] = f"/thumbnail/{video['file_hash']}"
+                else:
+                    video["thumbnail_url"] = None
+                    
+            return jsonify({
+                "videos": videos,
+                "total": len(videos)
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching map videos: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/map/locations")
+    def api_map_locations():
+        """
+        Get unique locations with video counts.
+        Returns locations aggregated by name with average coordinates.
+        """
+        from ..db import Database
+        
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+        
+        try:
+            locations = db.get_location_counts()
+            return jsonify({
+                "locations": locations,
+                "total": len(locations)
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching map locations: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/map/geocode")
+    def api_map_geocode():
+        """
+        Geocode a location name using Nominatim API.
+        Checks cache first, then calls Nominatim if not cached.
+        """
+        import urllib.request
+        import urllib.parse
+        
+        from ..db import Database
+        
+        location = request.args.get("location", "").strip()
+        if not location:
+            return jsonify({"error": "No location provided"}), 400
+        
+        # Check cache first
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+        
+        try:
+            cached = db.get_cached_location(location)
+            if cached:
+                return jsonify({
+                    "source": "cache",
+                    "lat": cached["lat"],
+                    "lon": cached["lon"],
+                    "cached_at": cached["cached_at"]
+                })
+            
+            # Not in cache, geocode with Nominatim
+            headers = {"User-Agent": "B-Roll-Organizer/0.2.1"}
+            params = urllib.parse.urlencode(
+                {"q": location, "format": "json", "limit": 1, "addressdetails": 0}
+            )
+            url = f"https://nominatim.openstreetmap.org/search?{params}"
+
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req) as response:
+                if response.status != 200:
+                    return jsonify({"error": "Failed to fetch from Nominatim"}), 502
+
+                data = json.loads(response.read().decode())
+                
+                if not data:
+                    return jsonify({"error": "Location not found"}), 404
+                
+                result = data[0]
+                lat = float(result.get("lat"))
+                lon = float(result.get("lon"))
+                
+                # Cache the result
+                db.cache_location(location, lat, lon)
+                
+                return jsonify({
+                    "source": "nominatim",
+                    "lat": lat,
+                    "lon": lon,
+                    "name": result.get("display_name"),
+                    "type": result.get("type", "unknown")
+                })
+                
+        except Exception as e:
+            current_app.logger.error(f"Geocoding error: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/map/geocode-cache", methods=["POST"])
+    def api_map_cache_geocode():
+        """
+        Cache a geocoding result.
+        Expects JSON with { "location_name": str, "lat": float, "lon": float }
+        """
+        from ..db import Database
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        location_name = data.get("location_name", "").strip()
+        lat = data.get("lat")
+        lon = data.get("lon")
+        
+        if not location_name or lat is None or lon is None:
+            return jsonify({"error": "Missing required fields: location_name, lat, lon"}), 400
+        
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid coordinates"}), 400
+        
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+        
+        try:
+            success = db.cache_location(location_name, lat, lon)
+            if success:
+                return jsonify({"success": True, "message": "Location cached"})
+            else:
+                return jsonify({"error": "Failed to cache location"}), 500
+        except Exception as e:
+            current_app.logger.error(f"Error caching location: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/map/nearby")
+    def api_map_nearby():
+        """
+        Find videos near a specific point.
+        Query params: lat, lon, radius_km (default: 5.0)
+        """
+        from ..db import Database
+        
+        try:
+            lat = float(request.args.get("lat", 0))
+            lon = float(request.args.get("lon", 0))
+            radius_km = float(request.args.get("radius_km", 5.0))
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid coordinates or radius"}), 400
+        
+        if lat == 0 and lon == 0:
+            return jsonify({"error": "Latitude and longitude required"}), 400
+        
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+        
+        try:
+            videos = db.nearby_videos(lat, lon, radius_km, limit=50)
+            
+            # Add thumbnail URLs
+            for video in videos:
+                if video.get("file_hash"):
+                    video["thumbnail_url"] = f"/thumbnail/{video['file_hash']}"
+                else:
+                    video["thumbnail_url"] = None
+                    
+            return jsonify({
+                "videos": videos,
+                "center": {"lat": lat, "lon": lon},
+                "radius_km": radius_km,
+                "total": len(videos)
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error finding nearby videos: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
     @app.route("/api/stats")
     def api_stats():
         return jsonify(get_stats())

@@ -180,6 +180,17 @@ class Database:
             ON videos(file_path, file_hash)
         """)
 
+        # ---- Location cache table for geocoding results ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS location_cache (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                location_name   TEXT UNIQUE NOT NULL,
+                lat             REAL NOT NULL,
+                lon             REAL NOT NULL,
+                cached_at       TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            )
+        """)
+
         conn.commit()
         print(f"✅ Database initialized at {self.db_path}")
 
@@ -615,3 +626,173 @@ class Database:
         stats["analyzed_count"] = row[0] or 0
 
         return stats
+
+    # ------------------------------------------------------------------
+    # Geocoding cache operations
+    # ------------------------------------------------------------------
+
+    def get_cached_location(self, location_name: str) -> dict[str, Any] | None:
+        """
+        Get cached geocoding result for a location name.
+        
+        Returns dict with 'lat', 'lon', 'cached_at' or None if not found.
+        """
+        conn = self.connect()
+        row = conn.execute(
+            "SELECT lat, lon, cached_at FROM location_cache WHERE location_name = ?",
+            (location_name,)
+        ).fetchone()
+        
+        if row:
+            return {
+                "lat": row[0],
+                "lon": row[1],
+                "cached_at": row[2]
+            }
+        return None
+
+    def cache_location(self, location_name: str, lat: float, lon: float) -> bool:
+        """
+        Cache geocoding result for a location name.
+        
+        Returns True if successful.
+        """
+        conn = self.connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO location_cache (location_name, lat, lon) 
+                VALUES (?, ?, ?)
+                ON CONFLICT(location_name) DO UPDATE SET
+                    lat = excluded.lat,
+                    lon = excluded.lon,
+                    cached_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                """,
+                (location_name, lat, lon)
+            )
+            conn.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error caching location: {e}")
+            return False
+
+    def get_all_cached_locations(self) -> list[dict[str, Any]]:
+        """Get all cached location geocoding results."""
+        conn = self.connect()
+        rows = conn.execute(
+            "SELECT location_name, lat, lon, cached_at FROM location_cache ORDER BY location_name"
+        ).fetchall()
+        
+        return [
+            {
+                "location_name": row[0],
+                "lat": row[1],
+                "lon": row[2],
+                "cached_at": row[3]
+            }
+            for row in rows
+        ]
+
+    def get_videos_with_coordinates(self, include_folder_locations: bool = True) -> list[dict[str, Any]]:
+        """
+        Get all videos that have GPS coordinates or can use cached folder location.
+        
+        Args:
+            include_folder_locations: If True, also include videos with folder_location 
+                                      that has a cached geocoding result
+                                      
+        Returns:
+            List of video dicts with coordinates
+        """
+        conn = self.connect()
+        
+        # First get videos with direct GPS coordinates
+        sql = """
+            SELECT * FROM videos 
+            WHERE gps_latitude IS NOT NULL AND gps_longitude IS NOT NULL
+        """
+        rows = conn.execute(sql).fetchall()
+        videos = [dict(row) for row in rows]
+        
+        if include_folder_locations:
+            # Get folder locations that have been geocoded
+            cache_rows = conn.execute(
+                "SELECT location_name, lat, lon FROM location_cache"
+            ).fetchall()
+            
+            # Build a lookup for quick access
+            cache_lookup = {row[0]: {"lat": row[1], "lon": row[2]} for row in cache_rows}
+            
+            # Get videos with folder_location that have cached coordinates
+            folder_rows = conn.execute(
+                """
+                SELECT * FROM videos 
+                WHERE folder_location IS NOT NULL 
+                AND (gps_latitude IS NULL OR gps_longitude IS NULL)
+                """
+            ).fetchall()
+            
+            for row in folder_rows:
+                folder = row["folder_location"]
+                if folder in cache_lookup:
+                    video = dict(row)
+                    video["gps_latitude"] = cache_lookup[folder]["lat"]
+                    video["gps_longitude"] = cache_lookup[folder]["lon"]
+                    video["location_source"] = "folder_cache"
+                    videos.append(video)
+        
+        return videos
+
+    def get_location_counts(self) -> list[dict[str, Any]]:
+        """
+        Get unique locations with video counts.
+        
+        Returns list of dicts with location info and video count.
+        """
+        conn = self.connect()
+        
+        # Get locations with direct GPS coordinates
+        sql = """
+            SELECT 
+                COALESCE(gps_location_name, 'Unknown Location') as location_name,
+                COUNT(*) as count,
+                AVG(gps_latitude) as avg_lat,
+                AVG(gps_longitude) as avg_lon
+            FROM videos 
+            WHERE gps_latitude IS NOT NULL AND gps_longitude IS NOT NULL
+            GROUP BY gps_location_name
+            ORDER BY count DESC
+        """
+        rows = conn.execute(sql).fetchall()
+        
+        locations = []
+        for row in rows:
+            locations.append({
+                "location_name": row[0],
+                "count": row[1],
+                "lat": row[2],
+                "lon": row[3]
+            })
+        
+        # Get folder locations with cached coordinates
+        cache_rows = conn.execute(
+            """
+            SELECT lc.location_name, lc.lat, lc.lon,
+                   COUNT(v.id) as count
+            FROM location_cache lc
+            JOIN videos v ON v.folder_location = lc.location_name
+            WHERE v.gps_latitude IS NULL OR v.gps_longitude IS NULL
+            GROUP BY lc.location_name
+            ORDER BY count DESC
+            """
+        ).fetchall()
+        
+        for row in cache_rows:
+            locations.append({
+                "location_name": row[0],
+                "count": row[3],
+                "lat": row[1],
+                "lon": row[2]
+            })
+        
+        return locations
