@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-from .clients import get_ai_client, get_fireworks_client, get_ollama_client
+from .clients import get_fireworks_client, get_ollama_client
 from .config import AI_PROVIDER, FIREWORKS_VISION_MODEL, OLLAMA_VISION_MODEL
 
 if TYPE_CHECKING:
@@ -24,26 +24,6 @@ if TYPE_CHECKING:
 MAX_IMAGE_DIMENSION = 1024
 # JPEG quality for resized images
 JPEG_QUALITY = 85
-
-# Try to import fireworks, fallback to ollama
-fireworks_client = None
-ollama = None
-
-if AI_PROVIDER == "fireworks":
-    try:
-        from fireworks.client import Fireworks
-
-        fireworks_client = Fireworks(
-            api_key=os.environ.get("FIREWORKS_API_KEY"),
-            base_url="https://api.fireworks.ai/inference/v1"
-        )
-    except ImportError:
-        pass
-else:
-    try:
-        import ollama
-    except ImportError:
-        pass
 
 ANALYSIS_PROMPT = (
     "You are analyzing keyframes from a b-roll video clip for a video editor's searchable catalog.\n\n"
@@ -124,6 +104,7 @@ def _validate_and_resize_image(image_bytes: bytes) -> bytes:
 
 def _analyze_with_fireworks(keyframes: list[bytes]) -> dict:
     """Analyze frames using Fireworks AI Kimi K2.5 Turbo."""
+    fireworks_client = get_fireworks_client()
     if fireworks_client is None:
         print("  Warning: Fireworks client not available, using empty analysis")
         return _empty_analysis()
@@ -161,6 +142,7 @@ def _analyze_with_fireworks(keyframes: list[bytes]) -> dict:
 
 def _analyze_with_ollama(keyframes: list[bytes]) -> dict:
     """Analyze frames using local Ollama vision model."""
+    ollama = get_ollama_client()
     if ollama is None:
         print("  Warning: Ollama not available, using empty analysis")
         return _empty_analysis()

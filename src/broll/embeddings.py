@@ -6,9 +6,9 @@ for semantic similarity search via sqlite-vec.
 """
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
+from .clients import get_fireworks_client, get_ollama_client
 from .config import (
     AI_PROVIDER,
     EMBEDDING_DIMENSIONS,
@@ -18,26 +18,6 @@ from .config import (
 
 if TYPE_CHECKING:
     pass
-
-# Try to import providers
-fireworks_client = None
-ollama = None
-
-if AI_PROVIDER == "fireworks":
-    try:
-        from fireworks.client import Fireworks
-
-        fireworks_client = Fireworks(
-            api_key=os.environ.get("FIREWORKS_API_KEY"),
-            base_url="https://api.fireworks.ai/inference/v1"
-        )
-    except ImportError:
-        pass
-else:
-    try:
-        import ollama
-    except ImportError:
-        pass
 
 
 def generate_embedding(text: str) -> list[float]:
@@ -57,6 +37,7 @@ def generate_embedding(text: str) -> list[float]:
 
 def _generate_embedding_fireworks(text: str) -> list[float]:
     """Generate embedding using Fireworks AI."""
+    fireworks_client = get_fireworks_client()
     if fireworks_client is None:
         raise RuntimeError("Fireworks client not available")
 
@@ -74,6 +55,7 @@ def _generate_embedding_fireworks(text: str) -> list[float]:
 
 def _generate_embedding_ollama(text: str) -> list[float]:
     """Generate embedding using local Ollama."""
+    ollama = get_ollama_client()
     if ollama is None:
         raise RuntimeError("Ollama not available")
 
