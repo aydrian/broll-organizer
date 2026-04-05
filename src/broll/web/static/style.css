@@ -212,7 +212,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
     overflow: hidden;
 }
 
-.card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.card-thumb img { width: 100%; height: 100%; object-fit: cover; transition: opacity 0.15s; }
 
 .no-thumb, .no-thumb-sm {
     display: flex;
@@ -947,6 +947,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
 }
 
 /* ═════════════════════════════════════════════════════════════════
+<<<<<<< HEAD
+=======
    Playlist Styles
    ═════════════════════════════════════════════════════════════════ */
 
@@ -2063,3 +2065,177 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
     }
 }
 
+<<<<<<< HEAD
+/* ═════════════════════════════════════════════════════════════════
+   Keyboard Navigation & Accessibility Styles
+   ═════════════════════════════════════════════════════════════════ */
+
+/* Focus-visible outlines for all interactive elements */
+*:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Remove default outline but keep focus-visible */
+button:focus,
+a:focus,
+input:focus,
+select:focus,
+[tabindex]:focus {
+    outline: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Video card keyboard focus indicator */
+.video-card.keyboard-focused,
+.video-card:focus-visible {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+    transform: translateY(-2px);
+}
+
+/* Hover preview video */
+.hover-preview-video {
+    background: #000;
+}
+
+/* Keyboard help modal styles */
+.keyboard-help-content {
+    max-width: 450px;
+    padding: 1.5rem;
+}
+
+.keyboard-help-content h3 {
+    margin-bottom: 1.25rem;
+    font-size: 1.2rem;
+    text-align: center;
+}
+
+.keyboard-shortcuts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.shortcut-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.95rem;
+}
+
+.shortcut-item kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2rem;
+    padding: 0.3rem 0.5rem;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+    box-shadow: 0 2px 0 var(--border);
+}
+
+.shortcut-item kbd + kbd {
+    margin-left: 0.25rem;
+}
+
+.shortcut-item span {
+    color: var(--text-muted);
+}
+
+/* Focus indicators for specific interactive elements */
+.nav-links a:focus-visible {
+    background: var(--bg-hover);
+    border-radius: 4px;
+}
+
+.batch-btn:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.folder-card:focus-visible {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+    transform: translateY(-2px);
+}
+
+.search-form input:focus-visible,
+.search-form button:focus-visible {
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+}
+
+/* Video detail page keyboard shortcuts */
+.detail-player:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 4px;
+    border-radius: var(--radius);
+}
+
+/* Add keyboard hint indicator */
+.keyboard-hint {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    z-index: 100;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+}
+
+.keyboard-hint:hover {
+    opacity: 1;
+    color: var(--text);
+}
+
+.keyboard-hint kbd {
+    padding: 0.15rem 0.3rem;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.75rem;
+}
+
+/* Responsive keyboard help */
+@media (max-width: 480px) {
+    .keyboard-help-content {
+        max-width: 100%;
+        margin: 1rem;
+    }
+
+    .shortcut-item {
+        font-size: 0.9rem;
+    }
+
+    .shortcut-item kbd {
+        min-width: 1.75rem;
+        padding: 0.25rem 0.4rem;
+        font-size: 0.8rem;
+    }
+
+    .keyboard-hint {
+        display: none; /* Hide on mobile */
+    }
+}
+=======
+>>>>>>> origin/main

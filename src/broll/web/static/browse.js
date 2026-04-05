@@ -10,7 +10,13 @@ document.addEventListener('DOMContentLoaded', () => {
         lastSelected: null,
         isMultiSelectMode: false,
         longPressDuration: 500, // ms for mobile long-press
-        allLoadedVideos: [] // Track all loaded video IDs for select-all
+        allLoadedVideos: [], // Track all loaded video IDs for select-all
+        // Keyboard navigation
+        focusedCardIndex: -1,
+        videoCards: [],
+        // Hover preview state
+        hoverPreviewTimeout: null,
+        currentPreviewVideo: null
     };
 
     const elements = {
@@ -37,6 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial load
     loadContent(true);
     loadPlaylists();
+    initKeyboardShortcuts();
+    createKeyboardHelpModal();
 
     // Infinite scroll
     const observer = new IntersectionObserver((entries) => {
@@ -741,7 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.videoGrid.insertAdjacentHTML('beforeend', html);
 
         // Add event handlers to new cards
-        elements.videoGrid.querySelectorAll('.video-card').forEach(card => {
+        elements.videoGrid.querySelectorAll('.video-card').forEach((card, index) => {
             const id = parseInt(card.dataset.id);
             const checkbox = card.querySelector('.select-checkbox');
 
@@ -762,9 +770,111 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
+            // Keyboard navigation focus tracking
+            card.addEventListener('focus', () => {
+                state.focusedCardIndex = index;
+                card.classList.add('keyboard-focused');
+            });
+            card.addEventListener('blur', () => {
+                card.classList.remove('keyboard-focused');
+            });
+
+            // Make card focusable
+            card.setAttribute('tabindex', '0');
+
+            // Hover preview
+            setupHoverPreview(card, video);
+
             // Setup long-press for mobile
             setupLongPress(card);
         });
+    }
+
+    // Hover preview functionality
+    function setupHoverPreview(card, video) {
+        const thumbContainer = card.querySelector('.card-thumb');
+        if (!thumbContainer || !video.file_hash) return;
+
+        let previewVideo = null;
+
+        card.addEventListener('mouseenter', () => {
+            // Delay start by 300ms to prevent accidental triggers
+            state.hoverPreviewTimeout = setTimeout(() => {
+                startPreview(thumbContainer, video);
+            }, 300);
+        });
+
+        card.addEventListener('mouseleave', () => {
+            clearTimeout(state.hoverPreviewTimeout);
+            stopPreview(thumbContainer);
+        });
+
+        // Also handle touch for mobile
+        card.addEventListener('touchstart', () => {
+            state.hoverPreviewTimeout = setTimeout(() => {
+                startPreview(thumbContainer, video);
+            }, 500);
+        }, { passive: true });
+
+        card.addEventListener('touchend', () => {
+            clearTimeout(state.hoverPreviewTimeout);
+            stopPreview(thumbContainer);
+        });
+    }
+
+    function startPreview(container, video) {
+        // Don't start if already playing a preview
+        if (container.querySelector('.hover-preview-video')) return;
+
+        const img = container.querySelector('img');
+        if (!img) return;
+
+        const videoEl = document.createElement('video');
+        videoEl.className = 'hover-preview-video';
+        videoEl.src = `/video/stream/${video.id}`;
+        videoEl.muted = true;
+        videoEl.playsInline = true;
+        videoEl.loop = false;
+        videoEl.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 5;
+        `;
+
+        // Hide the image
+        img.style.opacity = '0';
+
+        container.appendChild(videoEl);
+        state.currentPreviewVideo = videoEl;
+
+        videoEl.play().catch(() => {
+            // Autoplay blocked or failed, restore image
+            stopPreview(container);
+        });
+
+        // Stop after 3 seconds
+        setTimeout(() => {
+            if (videoEl.parentElement) {
+                stopPreview(container);
+            }
+        }, 3000);
+    }
+
+    function stopPreview(container) {
+        const videoEl = container.querySelector('.hover-preview-video');
+        if (videoEl) {
+            videoEl.pause();
+            videoEl.remove();
+        }
+        const img = container.querySelector('img');
+        if (img) {
+            img.style.opacity = '1';
+        }
+        state.currentPreviewVideo = null;
     }
 
     // Helpers
@@ -789,6 +899,196 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<div class="card-tags">
             ${parsed.slice(0, 4).map(tag => `<span class="tag">${tag}</span>`).join('')}
         </div>`;
+    }
+
+    // Keyboard shortcuts
+    function initKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            // Don't trigger shortcuts when typing in inputs
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                // Allow Escape to close modals even in inputs
+                if (e.key === 'Escape') {
+                    if (!elements.batchLocationModal.classList.contains('hidden')) {
+                        closeBatchLocationModal();
+                        e.preventDefault();
+                    } else if (!elements.exportModal.classList.contains('hidden')) {
+                        closeExportModal();
+                        e.preventDefault();
+                    }
+                }
+                return;
+            }
+
+            switch (e.key) {
+                case '/':
+                    e.preventDefault();
+                    focusSearch();
+                    break;
+                case 'j':
+                case 'J':
+                    e.preventDefault();
+                    navigateCards(1);
+                    break;
+                case 'k':
+                case 'K':
+                    e.preventDefault();
+                    navigateCards(-1);
+                    break;
+                case 'f':
+                case 'F':
+                    e.preventDefault();
+                    toggleFavoriteFocused();
+                    break;
+                case ' ': // Space
+                    e.preventDefault();
+                    togglePlayFocused();
+                    break;
+                case '?':
+                    e.preventDefault();
+                    showKeyboardHelp();
+                    break;
+                case 'Escape':
+                    if (!elements.batchLocationModal.classList.contains('hidden')) {
+                        closeBatchLocationModal();
+                    } else if (!elements.exportModal.classList.contains('hidden')) {
+                        closeExportModal();
+                    } else {
+                        hideKeyboardHelp();
+                        clearSelection();
+                    }
+                    break;
+            }
+        });
+    }
+
+    function focusSearch() {
+        const searchInput = document.querySelector('input[name="q"]');
+        if (searchInput) {
+            searchInput.focus();
+            searchInput.select();
+        }
+    }
+
+    function navigateCards(direction) {
+        const cards = state.videoCards;
+        if (cards.length === 0) return;
+
+        // Update focused index
+        state.focusedCardIndex += direction;
+
+        // Clamp to valid range
+        if (state.focusedCardIndex < 0) {
+            state.focusedCardIndex = 0;
+        } else if (state.focusedCardIndex >= cards.length) {
+            state.focusedCardIndex = cards.length - 1;
+        }
+
+        // Focus the card
+        const card = cards[state.focusedCardIndex];
+        if (card) {
+            card.focus();
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+
+    function toggleFavoriteFocused() {
+        const card = state.videoCards[state.focusedCardIndex];
+        if (!card) return;
+
+        const id = parseInt(card.dataset.id);
+        const checkbox = card.querySelector('.select-checkbox');
+
+        // Trigger the checkbox change
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            toggleSelection(id, card, { shiftKey: false });
+        }
+    }
+
+    function togglePlayFocused() {
+        // If there's a current preview video, pause/play it
+        if (state.currentPreviewVideo) {
+            if (state.currentPreviewVideo.paused) {
+                state.currentPreviewVideo.play();
+            } else {
+                state.currentPreviewVideo.pause();
+            }
+            return;
+        }
+
+        // Otherwise, try to play the focused card's preview
+        const card = state.videoCards[state.focusedCardIndex];
+        if (!card) return;
+
+        const thumbContainer = card.querySelector('.card-thumb');
+        const videoId = card.dataset.id;
+        const videoData = { id: videoId, file_hash: card.dataset.path };
+
+        if (thumbContainer) {
+            startPreview(thumbContainer, videoData);
+        }
+    }
+
+    // Keyboard help modal
+    function createKeyboardHelpModal() {
+        const modal = document.createElement('div');
+        modal.id = 'keyboard-help-modal';
+        modal.className = 'modal hidden';
+        modal.innerHTML = `
+            <div class="modal-content keyboard-help-content">
+                <h3>Keyboard Shortcuts</h3>
+                <div class="keyboard-shortcuts-list">
+                    <div class="shortcut-item">
+                        <kbd>/</kbd>
+                        <span>Focus search</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>j</kbd> / <kbd>k</kbd>
+                        <span>Navigate videos</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>f</kbd>
+                        <span>Toggle favorite/select</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Space</kbd>
+                        <span>Play/pause preview</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>?</kbd>
+                        <span>Show this help</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Esc</kbd>
+                        <span>Close / Clear selection</span>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-primary" onclick="document.getElementById('keyboard-help-modal').classList.add('hidden')">Got it</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // Add keyboard hint
+        const hint = document.createElement('div');
+        hint.className = 'keyboard-hint';
+        hint.innerHTML = 'Press <kbd>?</kbd> for keyboard shortcuts';
+        document.body.appendChild(hint);
+    }
+
+    function showKeyboardHelp() {
+        const modal = document.getElementById('keyboard-help-modal');
+        if (modal) {
+            modal.classList.remove('hidden');
+        }
+    }
+
+    function hideKeyboardHelp() {
+        const modal = document.getElementById('keyboard-help-modal');
+        if (modal) {
+            modal.classList.add('hidden');
+        }
     }
 });
 

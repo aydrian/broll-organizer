@@ -245,4 +245,128 @@
 <div class="detail-back">
     <a href="javascript:history.back()">&laquo; Back to Browse</a>
 </div>
+
+<script>
+    // Video detail page keyboard shortcuts
+    document.addEventListener('DOMContentLoaded', () => {
+        const video = document.querySelector('video');
+        const playerContainer = document.querySelector('.detail-player');
+        
+        if (!video) return;
+
+        // Make player focusable
+        playerContainer.setAttribute('tabindex', '0');
+
+        document.addEventListener('keydown', (e) => {
+            // Don't trigger when typing in inputs
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            switch (e.key) {
+                case ' ':
+                    e.preventDefault();
+                    if (video.paused) {
+                        video.play();
+                    } else {
+                        video.pause();
+                    }
+                    break;
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    video.currentTime = Math.max(0, video.currentTime - 5);
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    video.currentTime = Math.min(video.duration, video.currentTime + 5);
+                    break;
+                case 'f':
+                case 'F':
+                    e.preventDefault();
+                    if (document.fullscreenElement) {
+                        document.exitFullscreen();
+                    } else {
+                        video.requestFullscreen();
+                    }
+                    break;
+                case 'm':
+                case 'M':
+                    e.preventDefault();
+                    video.muted = !video.muted;
+                    break;
+                case '?':
+                    e.preventDefault();
+                    showVideoHelp();
+                    break;
+                case 'Escape':
+                    hideVideoHelp();
+                    break;
+            }
+        });
+
+        // Click to focus player for keyboard controls
+        playerContainer.addEventListener('click', () => {
+            playerContainer.focus();
+        });
+
+        // Create help modal if not exists
+        function showVideoHelp() {
+            let modal = document.getElementById('video-help-modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'video-help-modal';
+                modal.className = 'modal hidden';
+                modal.innerHTML = `
+                    <div class="modal-content keyboard-help-content">
+                        <h3>Video Player Shortcuts</h3>
+                        <div class="keyboard-shortcuts-list">
+                            <div class="shortcut-item">
+                                <kbd>Space</kbd>
+                                <span>Play / Pause</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>←</kbd> / <kbd>→</kbd>
+                                <span>Seek -5s / +5s</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>f</kbd>
+                                <span>Fullscreen</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>m</kbd>
+                                <span>Mute / Unmute</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>?</kbd>
+                                <span>Show this help</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Esc</kbd>
+                                <span>Close help / Exit fullscreen</span>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn-primary" onclick="document.getElementById('video-help-modal').classList.add('hidden')">Got it</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            }
+            modal.classList.remove('hidden');
+        }
+
+        function hideVideoHelp() {
+            const modal = document.getElementById('video-help-modal');
+            if (modal) {
+                modal.classList.add('hidden');
+            }
+        }
+
+        // Add keyboard hint
+        const hint = document.createElement('div');
+        hint.className = 'keyboard-hint';
+        hint.innerHTML = 'Press <kbd>?</kbd> for keyboard shortcuts';
+        document.body.appendChild(hint);
+    });
+</script>
 {% endblock %}
