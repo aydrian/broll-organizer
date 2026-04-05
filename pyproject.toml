@@ -32,6 +32,7 @@ target-version = "py312"
 
 [dependency-groups]
 dev = [
+    "alembic>=1.15",
     "pytest>=8.0",
     "ruff>=0.9",
 ]

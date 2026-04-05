@@ -16,3 +16,6 @@ wheels/
 # Database files
 *.db
 .broll/
+
+# Alembic
+alembic/versions/__pycache__/
