@@ -6,10 +6,11 @@ AI-powered b-roll organizer using **Fireworks AI** (with Ollama fallback for loc
 
 `broll-organizer` is an AI-powered video cataloging tool designed to organize and search large collections of b-roll footage stored on external drives. It uses Large Language Models (LLMs) to automatically analyze, tag, and describe video clips, making them searchable through natural language.
 
-The project has three main interfaces:
+The project has two main interfaces:
 1.  A **Command-Line Interface (CLI)** for initializing the catalog, processing videos, and performing searches.
-2.  A **Web Interface (Flask)** for visually browsing the catalog, searching for clips, viewing video details, and using a chatbot to query the collection.
-3.  An **OpenClaw Agent API** for programmatic access by AI assistants.
+2.  A **Web Interface (Flask)** for visually browsing the catalog, searching for clips, and viewing video details.
+
+An **OpenClaw Agent API** is also available for programmatic access by AI assistants.
 
 ## Key Technologies
 
@@ -20,9 +21,8 @@ The project has three main interfaces:
 *   **Image Processing:** `pillow`
 *   **Database:** SQLite with vector support via `sqlite-vec` for semantic search.
 *   **AI/ML:** [Fireworks AI](https://fireworks.ai/) for fast, high-quality inference (or local Ollama as fallback)
-    *   **Vision Analysis:** `kimi-k2p5-turbo` (multimodal)
-    *   **Embeddings:** `nomic-embed-text-v1.5`
-    *   **Chat:** `kimi-k2p5-turbo`
+    *   **Vision Analysis:** `kimi-k2p5-turbo` (multimodal) - for scene descriptions and tags
+    *   **Embeddings:** `nomic-embed-text-v1.5` - for semantic search
 *   **Folder-based location:** Since devices like Osmo Pocket 3 don't encode GPS, location is inferred from folder names.
 
 ## AI Provider Setup
@@ -54,7 +54,6 @@ For offline use, install [Ollama](https://ollama.com/):
     ```bash
     ollama pull minicpm-v      # Vision analysis
     ollama pull nomic-embed-text  # Embeddings
-    ollama pull gemma3:4b      # Chat
     ```
 3.  **Set Provider in `.env` or env var:**
     ```bash
@@ -146,7 +145,6 @@ Environment variables:
 | `AI_PROVIDER` | AI backend to use: `fireworks` or `ollama` | `fireworks` |
 | `FIREWORKS_API_KEY` | Your Fireworks API key | (required for Fireworks) |
 | `FIREWORKS_VISION_MODEL` | Vision model identifier | `accounts/fireworks/models/kimi-k2p5-turbo` |
-| `FIREWORKS_CHAT_MODEL` | Chat model identifier | `accounts/fireworks/models/kimi-k2p5-turbo` |
 | `FIREWORKS_EMBEDDING_MODEL` | Embedding model identifier | `accounts/fireworks/models/nomic-embed-text-v1.5` |
 
 ## License
