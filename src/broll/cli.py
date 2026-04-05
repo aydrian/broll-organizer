@@ -3,7 +3,6 @@
 CLI entry point for the b-roll organizer.
 '''
 from __future__ import annotations
-from pickle import FALSE
 
 import click
 from datetime import datetime, timezone
