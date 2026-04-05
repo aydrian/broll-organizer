@@ -342,10 +342,11 @@ def _print_search_result(rank: int, video: dict):
 @cli.command()
 @click.argument("drive_path", type=click.Path(exists=True, file_okay=False))
 @click.option("--port", default=WEB_PORT, help="Port for the web UI")
-@click.option("--host", default=WEB_HOST, help="Host to bind to")
+@click.option("--host", default=WEB_HOST, help="Host to bind to (use 0.0.0.0 for Tailscale/external access)")
 def web(drive_path: str, port: int, host: str):
     """Launch the web UI for browsing and chatting."""
     from .web.app import create_app
+    import socket
 
     drive = Path(drive_path)
     db_path = get_db_path(drive)
@@ -356,10 +357,31 @@ def web(drive_path: str, port: int, host: str):
 
     app = create_app(drive_path)
 
-    click.echo(f"\nB-Roll Catalog Web UI")
-    click.echo(f"  http://{host}:{port}")
+    click.echo(f"\n🎬 B-Roll Catalog Web UI")
+    click.echo(f"  Local:    http://{host}:{port}")
+    
+    # Try to detect Tailscale IP
+    if host == "0.0.0.0":
+        try:
+            # Look for tailscale0 interface
+            import subprocess
+            result = subprocess.run(
+                ["ip", "addr", "show", "tailscale0"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                import re
+                match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)/\d+', result.stdout)
+                if match:
+                    tailscale_ip = match.group(1)
+                    click.echo(f"  Tailscale: http://{tailscale_ip}:{port}")
+        except Exception:
+            pass
+        click.echo(f"  (Accessible from other devices on your Tailscale network)")
+    
     click.echo(f"  Database: {db_path}")
-    click.echo(f"  Press Ctrl+C to stop\n")
+    click.echo(f"\n  Press Ctrl+C to stop\n")
 
     app.run(host=host, port=port, debug=False)
 
