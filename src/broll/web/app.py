@@ -1,6 +1,5 @@
 """
-Flask web application for browsing, searching, and chatting
-with the b-roll catalog.
+Flask web application for browsing and searching the b-roll catalog.
 
 Uses plain sqlite3 to avoid sqlite-vec architecture issues on Raspberry Pi.
 Implements connection pooling using thread-local storage for improved performance.
@@ -335,37 +334,6 @@ def create_app(drive_path: str) -> Flask:
         if not video:
             abort(404)
         return render_template("video_detail.html", video=video)
-
-    @app.route("/chat")
-    def chat_page():
-        return render_template("chat.html")
-
-    @app.route("/api/chat", methods=["POST"])
-    def api_chat():
-        from ..chat import chat_with_catalog
-        from ..db import Database
-
-        data = request.get_json()
-        if not data or not data.get("message"):
-            return jsonify({"error": "No message provided"}), 400
-
-        # Chat requires the full Database class with search functions
-        # This may not work on Pi without sqlite-vec, so we do a simple fallback
-        try:
-            db_path = current_app.config["DB_PATH"]
-            with Database(db_path) as db:
-                history = data.get("history", [])
-                result = chat_with_catalog(data["message"], db, history)
-                return jsonify(result)
-        except Exception as e:
-            # Fallback to simple search
-            message = data["message"]
-            search_terms = " ".join([w for w in message.lower().split() if len(w) > 3])
-            videos = search_videos(search_terms, limit=5)
-            return jsonify({
-                "response": f"Found {len(videos)} videos related to your query.",
-                "videos": videos,
-            })
 
     @app.route("/thumbnail/<file_hash>")
     def thumbnail(file_hash: str):
