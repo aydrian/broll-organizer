@@ -3,7 +3,6 @@
 CLI entry point for the b-roll organizer.
 '''
 from __future__ import annotations
-from pickle import FALSE
 
 import click
 from datetime import datetime, timezone
@@ -418,19 +417,6 @@ def agent(drive_path: str, port: int, host: str):
         raise SystemExit(1)
 
     app = create_agent_app(drive_path)
-
-    click.echo(f"\nB-Roll Catalog Agent API")
-    click.echo(f"  http://{host}:{port}")
-    click.echo(f"  Database: {db_path}")
-    click.echo(f"\nEndpoints:")
-    click.echo(f"  GET  /health       - Health check")
-    click.echo(f"  GET  /stats        - Catalog statistics")
-    click.echo(f"  GET  /search?q=... - Search videos")
-    click.echo(f"  GET  /videos       - List videos")
-    click.echo(f"  GET  /video/<id>   - Get video details")
-    click.echo(f"  GET  /thumbnail/<id> - Get video thumbnail")
-    click.echo(f"  POST /chat         - Chat with the catalog")
-    click.echo(f"\nPress Ctrl+C to stop\n")
 
     click.echo(f"\nB-Roll Catalog Agent API")
     click.echo(f"  http://{host}:{port}")

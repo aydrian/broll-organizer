@@ -3,18 +3,19 @@ Flask web application for browsing, searching, and chatting
 with the b-roll catalog.
 
 Uses plain sqlite3 to avoid sqlite-vec architecture issues on Raspberry Pi.
+Implements connection pooling using thread-local storage for improved performance.
 """
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 
 from flask import (
     Flask,
     abort,
     current_app,
-    g,
     jsonify,
     render_template,
     request,
@@ -22,6 +23,35 @@ from flask import (
 )
 
 from ..config import get_db_path, get_thumbs_dir
+
+# Thread-local storage for database connections per thread
+_thread_local = threading.local()
+
+
+def _get_thread_db_connection(db_path: str) -> sqlite3.Connection:
+    """
+    Get a thread-local database connection.
+    
+    Each thread gets its own connection stored in thread-local storage.
+    Connections are reused across requests within the same thread,
+    reducing connection overhead.
+    
+    Args:
+        db_path: Path to the SQLite database file.
+        
+    Returns:
+        A sqlite3 connection with Row factory configured.
+    """
+    # Use thread-local storage to ensure thread safety with SQLite
+    if not hasattr(_thread_local, 'db_connections'):
+        _thread_local.db_connections = {}
+    
+    if db_path not in _thread_local.db_connections:
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        _thread_local.db_connections[db_path] = conn
+    
+    return _thread_local.db_connections[db_path]
 
 
 def create_app(drive_path: str) -> Flask:
@@ -77,17 +107,27 @@ def create_app(drive_path: str) -> Flask:
     # ── Database helper ──
 
     def get_db_conn() -> sqlite3.Connection:
-        """Get a plain sqlite3 connection (no sqlite-vec)."""
-        if "db_conn" not in g:
-            g.db_conn = sqlite3.connect(current_app.config["DB_PATH"])
-            g.db_conn.row_factory = sqlite3.Row
-        return g.db_conn
+        """
+        Get a database connection with thread-local caching.
+        
+        Uses thread-local storage to maintain one connection per thread,
+        reducing connection overhead for concurrent requests.
+        
+        Returns:
+            A sqlite3 connection with Row factory configured.
+        """
+        return _get_thread_db_connection(current_app.config["DB_PATH"])
 
     @app.teardown_appcontext
     def close_db(exc):
-        conn = g.pop("db_conn", None)
-        if conn:
-            conn.close()
+        """
+        Cleanup at end of request.
+        
+        Note: With connection pooling via thread-local storage, we don't close
+        the connection here. The connection remains open for reuse by the same
+        thread in subsequent requests.
+        """
+        pass
 
     def get_stats() -> dict:
         """Get catalog statistics."""
@@ -158,7 +198,8 @@ def create_app(drive_path: str) -> Flask:
         folders = []
         for row in folder_rows:
             name = row[0]
-            if name and name != folder_path and "/" not in name:
+            # Skip nulls, empty strings, the current path itself, paths with slashes, and video files
+            if name and name != folder_path and "/" not in name and not name.endswith('.MP4'):
                 folders.append({"name": name, "path": (folder_path + "/" + name).strip("/")})
 
         # Get videos in this folder
@@ -320,8 +361,18 @@ def create_app(drive_path: str) -> Flask:
         if not video:
             abort(404)
 
+        file_path = video["file_path"]
+        
+        # Validate file_path to prevent directory traversal
+        if file_path.startswith("..") or file_path.startswith("/"):
+            abort(400)
+        
         drive = Path(current_app.config["DRIVE_PATH"])
-        video_path = drive / video["file_path"]
+        video_path = (drive / file_path).resolve()
+        
+        # Verify resolved path is within drive root
+        if not str(video_path).startswith(str(drive)):
+            abort(400)
 
         if not video_path.exists():
             abort(404)
