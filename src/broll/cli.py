@@ -357,7 +357,7 @@ def web(drive_path: str, port: int, host: str):
 
     app = create_app(drive_path)
 
-    click.echo(f"\n🎬 B-Roll Catalog Web UI")
+    click.echo(f"\nB-Roll Catalog Web UI")
     click.echo(f"  Local:    http://{host}:{port}")
     
     # Try to detect Tailscale IP and hostname
