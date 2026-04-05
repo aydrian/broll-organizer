@@ -242,9 +242,26 @@ def _print_analyzed_samples(videos: list[dict]):
     default="hybrid",
     help="Search mode",
 )
-def search(query: str, drive: str, limit: int, mode: str):
+@click.option(
+    "--grid",
+    metavar="COLSxROWS",
+    help="Generate a contact sheet (grid) of thumbnails. Format: '3x3', '4x2', etc."
+)
+@click.option(
+    "--export-gallery",
+    "export_gallery",
+    type=click.Path(),
+    help="Export search results to an HTML gallery file"
+)
+@click.option(
+    "--gallery-base64",
+    is_flag=True,
+    help="Embed thumbnails as base64 in HTML gallery (makes file self-contained but larger)"
+)
+def search(query: str, drive: str, limit: int, mode: str, grid: str | None, export_gallery: str | None, gallery_base64: bool):
     """Search for video clips by description."""
     from .search import hybrid_search, keyword_search, semantic_search
+    from .gallery import generate_contact_sheet, generate_html_gallery, get_grids_dir, parse_grid_size
 
     drive_path = Path(drive)
     db_path = get_db_path(drive_path)
@@ -277,6 +294,53 @@ def search(query: str, drive: str, limit: int, mode: str):
         for i, video in enumerate(results, 1):
             _print_search_result(i, video)
 
+        # Generate contact sheet if requested
+        if grid:
+            try:
+                cols, rows = parse_grid_size(grid)
+                grid_count = cols * rows
+                if len(results) > grid_count:
+                    click.echo(f"\nNote: Grid fits {grid_count} images, but {len(results)} results found. Showing first {grid_count}.")
+                    grid_videos = results[:grid_count]
+                else:
+                    grid_videos = results
+
+                grids_dir = get_grids_dir(drive_path)
+                grids_dir.mkdir(parents=True, exist_ok=True)
+
+                # Generate filename based on query and timestamp
+                from datetime import datetime
+                safe_query = "".join(c if c.isalnum() else "_" for c in query)[:30]
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                grid_filename = f"grid_{safe_query}_{timestamp}_{cols}x{rows}.jpg"
+                grid_path = grids_dir / grid_filename
+
+                click.echo(f"\nGenerating contact sheet ({cols}x{rows})...")
+                generate_contact_sheet(grid_videos, grid_path, grid_size=(cols, rows))
+                click.echo(f"Saved to: {grid_path}")
+            except ValueError as e:
+                click.echo(f"\nError: {e}", err=True)
+                raise SystemExit(1)
+            except Exception as e:
+                click.echo(f"\nError generating grid: {e}", err=True)
+                raise SystemExit(1)
+
+        # Export HTML gallery if requested
+        if export_gallery:
+            try:
+                gallery_path = Path(export_gallery)
+                click.echo(f"\nExporting HTML gallery...")
+                generate_html_gallery(
+                    results,
+                    gallery_path,
+                    title=f"Search: {query}",
+                    include_base64=gallery_base64
+                )
+                click.echo(f"Saved to: {gallery_path}")
+            except Exception as e:
+                click.echo(f"\nError exporting gallery: {e}", err=True)
+                raise SystemExit(1)
+
 
 def _print_search_result(rank: int, video: dict):
     """Pretty-print a single search result."""
@@ -290,6 +354,7 @@ def _print_search_result(rank: int, video: dict):
     time_of_day = video.get("time_of_day")
     tags = video.get("tags", "")
     relative_path = video.get("file_path", "")
+    thumbnail_path = video.get("thumbnail_path")
 
     # Search metadata
     score = video.get("search_score", 0)
@@ -310,10 +375,13 @@ def _print_search_result(rank: int, video: dict):
     click.echo(f"     Path: {relative_path}")
     click.echo(f"     Duration: {duration_str} | {resolution}")
 
+    # Show thumbnail path if available
+    if thumbnail_path:
+        click.echo(f"     Thumbnail: {thumbnail_path}")
+
     if description and not description.startswith("ERROR"):
         click.echo(f"     {description[:200]}")
 
-    
     if tags:
         if isinstance(tags, str):
             try:
@@ -659,3 +727,60 @@ def doctor(drive_path: str, thumbnails: bool, orphaned: bool, hashes: bool, fix:
         raise SystemExit(0)
     else:
         raise SystemExit(1)
+
+
+@cli.command()
+@click.option("--id", "video_id", type=int, required=True, help="Video ID to fetch thumbnail for")
+@click.option("--drive", required=True, type=click.Path(exists=True, file_okay=False), help="Path to the external drive")
+@click.option("--base64", "base64_output", is_flag=True, help="Output as base64-encoded data URI")
+@click.option("--output", "output_path", type=click.Path(), help="Save thumbnail to file path")
+def thumbnail(video_id: int, drive: str, base64_output: bool, output_path: str | None):
+    """Get a video thumbnail by ID."""
+    from .gallery import get_thumbnail_base64
+
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.")
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        video = db.get_video_by_id(video_id)
+
+        if not video:
+            click.echo(f"Video with ID {video_id} not found.", err=True)
+            raise SystemExit(1)
+
+        thumb_path = video.get("thumbnail_path")
+
+        if not thumb_path:
+            click.echo(f"No thumbnail available for video ID {video_id}.", err=True)
+            raise SystemExit(1)
+
+        thumb_file = Path(thumb_path)
+        if not thumb_file.exists():
+            click.echo(f"Thumbnail file not found: {thumb_path}", err=True)
+            raise SystemExit(1)
+
+        # Output to file if requested
+        if output_path:
+            import shutil
+            output_file = Path(output_path)
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(thumb_path, output_path)
+            click.echo(f"Thumbnail saved to: {output_path}")
+            return
+
+        # Output as base64 if requested
+        if base64_output:
+            base64_data = get_thumbnail_base64(thumb_path)
+            if base64_data:
+                click.echo(base64_data)
+            else:
+                click.echo("Failed to encode thumbnail as base64.", err=True)
+                raise SystemExit(1)
+            return
+
+        # Default: just print the path
+        click.echo(thumb_path)
