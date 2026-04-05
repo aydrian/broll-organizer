@@ -485,6 +485,178 @@ class Database:
         return [dict(row) for row in rows]
 
     # ------------------------------------------------------------------
+    # Timeline / Date-based queries
+    # ------------------------------------------------------------------
+
+    def get_years_with_counts(self) -> list[dict[str, Any]]:
+        """
+        Get all years that have videos, with video counts and activity data.
+        
+        Returns list of dicts with year, count, and total_seconds.
+        """
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT 
+                strftime('%Y', creation_date) as year,
+                COUNT(*) as count,
+                COALESCE(SUM(duration_seconds), 0) as total_seconds
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+            GROUP BY year
+            ORDER BY year DESC
+            """
+        ).fetchall()
+        
+        return [
+            {
+                "year": row[0],
+                "count": row[1],
+                "total_seconds": row[2]
+            }
+            for row in rows
+        ]
+
+    def get_year_activity_heatmap(self, year: int) -> list[dict[str, Any]]:
+        """
+        Get daily video counts for a year (for heatmap visualization).
+        
+        Returns list of dicts with date and count for each day with videos.
+        """
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT 
+                strftime('%Y-%m-%d', creation_date) as date,
+                COUNT(*) as count,
+                COALESCE(SUM(duration_seconds), 0) as total_seconds
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+              AND strftime('%Y', creation_date) = ?
+            GROUP BY date
+            ORDER BY date
+            """,
+            (str(year),)
+        ).fetchall()
+        
+        return [
+            {
+                "date": row[0],
+                "count": row[1],
+                "total_seconds": row[2]
+            }
+            for row in rows
+        ]
+
+    def get_month_grid(self, year: int, month: int) -> list[dict[str, Any]]:
+        """
+        Get video counts for each day in a specific month.
+        
+        Returns list of dicts with day, count, and total_seconds.
+        """
+        conn = self.connect()
+        # Pad month with leading zero if needed
+        month_str = f"{year}-{month:02d}"
+        
+        rows = conn.execute(
+            """
+            SELECT 
+                CAST(strftime('%d', creation_date) AS INTEGER) as day,
+                COUNT(*) as count,
+                COALESCE(SUM(duration_seconds), 0) as total_seconds
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+              AND strftime('%Y-%m', creation_date) = ?
+            GROUP BY day
+            ORDER BY day
+            """,
+            (month_str,)
+        ).fetchall()
+        
+        return [
+            {
+                "day": row[0],
+                "count": row[1],
+                "total_seconds": row[2]
+            }
+            for row in rows
+        ]
+
+    def get_videos_by_date(self, date_str: str) -> list[dict[str, Any]]:
+        """
+        Get all videos for a specific date (YYYY-MM-DD format).
+        
+        Returns list of video dicts.
+        """
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT * FROM videos 
+            WHERE creation_date IS NOT NULL
+              AND strftime('%Y-%m-%d', creation_date) = ?
+            ORDER BY file_name
+            """,
+            (date_str,)
+        ).fetchall()
+        
+        return [dict(row) for row in rows]
+
+    def get_on_this_day(self, month: int, day: int, exclude_year: int | None = None) -> list[dict[str, Any]]:
+        """
+        Get videos from the same month/day across different years.
+        
+        Args:
+            month: Month number (1-12)
+            day: Day of month (1-31)
+            exclude_year: Optional year to exclude (e.g., current year)
+            
+        Returns list of video dicts with year info.
+        """
+        conn = self.connect()
+        
+        sql = """
+            SELECT *, strftime('%Y', creation_date) as year
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+              AND CAST(strftime('%m', creation_date) AS INTEGER) = ?
+              AND CAST(strftime('%d', creation_date) AS INTEGER) = ?
+        """
+        params = [month, day]
+        
+        if exclude_year:
+            sql += " AND strftime('%Y', creation_date) != ?"
+            params.append(str(exclude_year))
+        
+        sql += " ORDER BY year DESC, file_name"
+        
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_date_range(self) -> dict[str, str] | None:
+        """
+        Get the earliest and latest dates in the catalog.
+        
+        Returns dict with 'earliest' and 'latest' dates, or None if no dates.
+        """
+        conn = self.connect()
+        row = conn.execute(
+            """
+            SELECT 
+                MIN(creation_date) as earliest,
+                MAX(creation_date) as latest
+            FROM videos 
+            WHERE creation_date IS NOT NULL
+            """
+        ).fetchone()
+        
+        if row and row[0] and row[1]:
+            return {
+                "earliest": row[0],
+                "latest": row[1]
+            }
+        return None
+
+    # ------------------------------------------------------------------
     # Write operations
     # ------------------------------------------------------------------
 
