@@ -104,6 +104,27 @@ def create_app(drive_path: str) -> Flask:
         mb = size_bytes / (1024**2)
         return f"{mb:.0f} MB"
 
+    # ── Drive connection check ──
+    
+    @app.before_request
+    def check_drive_connected():
+        """Check if the external drive is connected before each request."""
+        db_path = Path(current_app.config["DB_PATH"])
+        
+        # Skip check for static files and the drive_not_connected page itself
+        if request.path.startswith('/static/'):
+            return None
+        
+        if not db_path.exists():
+            # For API requests, return JSON error
+            if request.path.startswith('/api/'):
+                return jsonify({
+                    "error": "Drive not connected",
+                    "message": "Please connect the external drive containing your B-roll catalog"
+                }), 503
+            # For web requests, show the drive not connected page
+            return render_template("drive_not_connected.html"), 503
+
     # ── Database helper ──
 
     def get_db_conn() -> sqlite3.Connection:

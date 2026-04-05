@@ -1,0 +1,26 @@
+[Unit]
+Description=B-Roll Catalog Web UI
+After=network.target tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+WorkingDirectory=/home/openclaw/apps/broll-organizer
+Environment=HOME=/home/openclaw
+Environment=PATH=/home/openclaw/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/home/openclaw/apps/broll-organizer/.env
+ExecStart=/home/openclaw/.local/bin/uv run broll web "/media/openclaw/Crucial X10" --host 0.0.0.0 --port 5555
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=broll-catalog
+
+[Install]
+WantedBy=multi-user.target

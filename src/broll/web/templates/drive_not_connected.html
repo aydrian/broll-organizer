@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drive Not Connected - B-Roll Catalog</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .container {
+            max-width: 600px;
+            text-align: center;
+        }
+        .icon {
+            font-size: 6rem;
+            margin-bottom: 1rem;
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            color: #fff;
+        }
+        p {
+            font-size: 1.1rem;
+            line-height: 1.6;
+            margin-bottom: 1.5rem;
+            color: #aaa;
+        }
+        .drive-info {
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .drive-info h2 {
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+            color: #4fc3f7;
+        }
+        .drive-info ul {
+            text-align: left;
+            margin: 0;
+            padding-left: 1.5rem;
+        }
+        .drive-info li {
+            margin: 0.5rem 0;
+            color: #ddd;
+        }
+        .status {
+            display: inline-block;
+            background: #ff6b6b;
+            color: #fff;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 600;
+            margin-top: 1rem;
+        }
+        .refresh {
+            margin-top: 2rem;
+            padding: 0.75rem 2rem;
+            background: #4fc3f7;
+            color: #1a1a2e;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .refresh:hover {
+            background: #29b6f6;
+        }
+        .note {
+            margin-top: 2rem;
+            font-size: 0.9rem;
+            color: #888;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">💾</div>
+        <h1>External Drive Not Connected</h1>
+        <p>The B-Roll Catalog cannot access your video library because the external drive is not connected.</p>
+        
+        <div class="drive-info">
+            <h2>📦 Required Drive</h2>
+            <ul>
+                <li><strong>Drive:</strong> Crucial X10</li>
+                <li><strong>Mount Point:</strong> /media/openclaw/Crucial X10</li>
+                <li><strong>Contains:</strong> Your B-roll video library and catalog database</li>
+            </ul>
+        </div>
+        
+        <p>Please connect the drive and wait a few seconds for it to mount, then refresh this page.</p>
+        
+        <span class="status">⚠️ Drive Offline</span>
+        
+        <br>
+        <button class="refresh" onclick="location.reload()">🔄 Refresh Page</button>
+        
+        <p class="note">The catalog will automatically detect when the drive is connected.</p>
+    </div>
+</body>
+</html>
