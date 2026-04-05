@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.2] - 2026-04-05
+## [0.2.3] - 2026-04-05
 
 ### Fixed
-- Web UI now uses plain sqlite3 to avoid sqlite-vec architecture issues on Raspberry Pi
-- Removed dependency on Database class with sqlite-vec for web queries
+- Upgrade sqlite-vec to 0.1.9 (includes aarch64 64-bit wheel for Raspberry Pi)
+- Web UI and Agent API now work with full sqlite-vec functionality on Pi
+- Revert web/app.py to use Database class with sqlite-vec support
 
 ## [0.2.1] - 2026-04-05
 
