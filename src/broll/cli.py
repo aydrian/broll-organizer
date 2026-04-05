@@ -342,10 +342,11 @@ def _print_search_result(rank: int, video: dict):
 @cli.command()
 @click.argument("drive_path", type=click.Path(exists=True, file_okay=False))
 @click.option("--port", default=WEB_PORT, help="Port for the web UI")
-@click.option("--host", default=WEB_HOST, help="Host to bind to")
+@click.option("--host", default=WEB_HOST, help="Host to bind to (use 0.0.0.0 for Tailscale/external access)")
 def web(drive_path: str, port: int, host: str):
     """Launch the web UI for browsing and chatting."""
     from .web.app import create_app
+    import socket
 
     drive = Path(drive_path)
     db_path = get_db_path(drive)
@@ -357,9 +358,45 @@ def web(drive_path: str, port: int, host: str):
     app = create_app(drive_path)
 
     click.echo(f"\nB-Roll Catalog Web UI")
-    click.echo(f"  http://{host}:{port}")
+    click.echo(f"  Local:    http://{host}:{port}")
+    
+    # Try to detect Tailscale IP and hostname
+    if host == "0.0.0.0":
+        try:
+            # Look for tailscale0 interface
+            import subprocess
+            result = subprocess.run(
+                ["ip", "addr", "show", "tailscale0"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                import re
+                match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)/\d+', result.stdout)
+                if match:
+                    tailscale_ip = match.group(1)
+                    click.echo(f"  Tailscale: http://{tailscale_ip}:{port}")
+            
+            # Try to get MagicDNS hostname
+            magic_result = subprocess.run(
+                ["tailscale", "status", "--json"],
+                capture_output=True,
+                text=True
+            )
+            if magic_result.returncode == 0:
+                import json
+                status = json.loads(magic_result.stdout)
+                self_dns = status.get("Self", {}).get("DNSName", "")
+                if self_dns:
+                    # Remove trailing dot if present
+                    hostname = self_dns.rstrip(".")
+                    click.echo(f"  MagicDNS:  http://{hostname}:{port}")
+        except Exception:
+            pass
+        click.echo(f"  (Accessible from other devices on your Tailscale network)")
+    
     click.echo(f"  Database: {db_path}")
-    click.echo(f"  Press Ctrl+C to stop\n")
+    click.echo(f"\n  Press Ctrl+C to stop\n")
 
     app.run(host=host, port=port, debug=False)
 
@@ -381,19 +418,6 @@ def agent(drive_path: str, port: int, host: str):
         raise SystemExit(1)
 
     app = create_agent_app(drive_path)
-
-    click.echo(f"\nB-Roll Catalog Agent API")
-    click.echo(f"  http://{host}:{port}")
-    click.echo(f"  Database: {db_path}")
-    click.echo(f"\nEndpoints:")
-    click.echo(f"  GET  /health       - Health check")
-    click.echo(f"  GET  /stats        - Catalog statistics")
-    click.echo(f"  GET  /search?q=... - Search videos")
-    click.echo(f"  GET  /videos       - List videos")
-    click.echo(f"  GET  /video/<id>   - Get video details")
-    click.echo(f"  GET  /thumbnail/<id> - Get video thumbnail")
-    click.echo(f"  POST /chat         - Chat with the catalog")
-    click.echo(f"\nPress Ctrl+C to stop\n")
 
     click.echo(f"\nB-Roll Catalog Agent API")
     click.echo(f"  http://{host}:{port}")

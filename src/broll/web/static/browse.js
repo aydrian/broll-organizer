@@ -152,18 +152,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         elements.folderGrid.style.display = 'grid';
         elements.folderGrid.innerHTML = folders.map(folder => `
-            <div class="folder-card" data-subfolder="${folder}">
+            <div class="folder-card" data-path="${folder.path}">
                 <div class="folder-icon">📁</div>
-                <div class="folder-name">${folder}</div>
+                <div class="folder-name">${folder.name}</div>
             </div>
         `).join('');
 
         // Add click handlers
         elements.folderGrid.querySelectorAll('.folder-card').forEach(card => {
             card.addEventListener('click', () => {
-                const sub = card.dataset.subfolder;
-                const newPath = state.path ? `${state.path}/${sub}` : sub;
-                navigateTo(newPath);
+                const path = card.dataset.path;
+                navigateTo(path);
             });
         });
     }

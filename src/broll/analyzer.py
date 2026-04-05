@@ -24,7 +24,10 @@ if AI_PROVIDER == "fireworks":
     try:
         from fireworks.client import Fireworks
 
-        fireworks_client = Fireworks(api_key=os.environ.get("FIREWORKS_API_KEY"))
+        fireworks_client = Fireworks(
+            api_key=os.environ.get("FIREWORKS_API_KEY"),
+            base_url="https://api.fireworks.ai/inference/v1"
+        )
     except ImportError:
         pass
 else:
@@ -49,7 +52,7 @@ ANALYSIS_PROMPT = (
     '- Setting type (e.g. "beach", "urban", "forest", "restaurant", "market")\n'
     '- Visual qualities (e.g. "bokeh", "silhouette", "reflections", "lens flare")\n'
     '- Weather/atmosphere (e.g. "sunny", "foggy", "rainy", "cloudy")\n'
-    '- Colors (e.g. "warm tones", "blue", "neon", "muted colors")\n\n"
+    '- Colors (e.g. "warm tones", "blue", "neon", "muted colors")\n\n'
     "Be specific and practical - a video editor needs to find this clip quickly."
 )
 

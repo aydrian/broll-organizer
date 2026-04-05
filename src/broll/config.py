@@ -29,8 +29,8 @@ THUMBS_DIRNAME: str = "thumbs"
 AI_PROVIDER: str = "fireworks"
 
 # Fireworks AI model names (using FirePass Kimi K2.5 Turbo)
-FIREWORKS_VISION_MODEL: str = "accounts/fireworks/models/kimi-k2p5-turbo"
-FIREWORKS_CHAT_MODEL: str = "accounts/fireworks/models/kimi-k2p5-turbo"
+FIREWORKS_VISION_MODEL: str = "accounts/fireworks/routers/kimi-k2p5-turbo"
+FIREWORKS_CHAT_MODEL: str = "accounts/fireworks/routers/kimi-k2p5-turbo"
 FIREWORKS_EMBEDDING_MODEL: str = "accounts/fireworks/models/nomic-embed-text-v1.5"
 
 # Ollama model names (fallback)
