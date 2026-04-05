@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 from flask import (
@@ -439,6 +440,32 @@ def create_app(drive_path: str) -> Flask:
         update_video(video["file_path"], updates)
 
         return jsonify({"success": True})
+
+    # ═════════════════════════════════════════════════════════════════
+    # Health Check Endpoint
+    # ═════════════════════════════════════════════════════════════════
+
+    @app.route("/api/health")
+    def api_health():
+        """
+        Health check endpoint for connection monitoring.
+        Returns 200 if drive is connected, 503 if not.
+        """
+        db_path = Path(current_app.config["DB_PATH"])
+        
+        if db_path.exists():
+            return jsonify({
+                "status": "healthy",
+                "drive_connected": True,
+                "timestamp": time.time()
+            }), 200
+        else:
+            return jsonify({
+                "status": "unhealthy",
+                "drive_connected": False,
+                "message": "External drive not connected",
+                "timestamp": time.time()
+            }), 503
 
     # ═════════════════════════════════════════════════════════════════
     # Map Routes & API

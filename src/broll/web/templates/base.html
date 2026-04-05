@@ -1,4 +1,3 @@
-<!-- src/broll/web/templates/base.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,6 +15,9 @@
             <a href="/" class="{% if request.endpoint == 'browse' %}active{% endif %}">Browse</a>
             <a href="/search" class="{% if request.endpoint == 'search_page' %}active{% endif %}">Search</a>
             <a href="/map" class="{% if request.endpoint == 'map_page' %}active{% endif %}">Map</a>
+        </div>
+        <div class="nav-status">
+            <span id="connection-status" class="connection-status online" title="Drive connected">[● Online]</span>
         </div>
     </nav>
     <main>

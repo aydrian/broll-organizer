@@ -17,6 +17,8 @@
     --tag-bg: #1e293b;
     --tag-text: #93c5fd;
     --green: #22c55e;
+    --red: #ef4444;
+    --orange: #f59e0b;
     --radius: 8px;
 }
 
@@ -53,6 +55,200 @@ a:hover { color: var(--accent-hover); }
 .nav-links { display: flex; gap: 1.5rem; }
 .nav-links a { color: var(--text-muted); font-size: 0.9rem; }
 .nav-links a:hover, .nav-links a.active { color: var(--text); }
+
+.nav-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* ── Connection Status Indicator ── */
+.connection-status {
+    font-size: 0.8rem;
+    font-weight: 500;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    transition: all 0.3s ease;
+    cursor: help;
+}
+
+.connection-status.online {
+    color: var(--green);
+}
+
+.connection-status.offline {
+    color: var(--red);
+    animation: pulse-offline 2s infinite;
+}
+
+@keyframes pulse-offline {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ── Offline Banner ── */
+.offline-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #7c2d12 0%, #9a3412 100%);
+    color: white;
+    padding: 0.75rem 1rem;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.offline-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.offline-icon {
+    font-size: 1.2rem;
+}
+
+.offline-text {
+    font-weight: 600;
+}
+
+.offline-banner .retry-btn,
+.offline-banner .cached-btn {
+    padding: 0.4rem 0.75rem;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.offline-banner .retry-btn {
+    background: white;
+    color: #7c2d12;
+}
+
+.offline-banner .retry-btn:hover {
+    background: #f3f4f6;
+}
+
+.offline-banner .retry-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.offline-banner .cached-btn {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+}
+
+.offline-banner .cached-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* ── Toast Notifications ── */
+.toast {
+    position: fixed;
+    top: 70px;
+    right: 1rem;
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    z-index: 1001;
+    transform: translateX(calc(100% + 2rem));
+    opacity: 0;
+    transition: all 0.3s ease;
+}
+
+.toast.show {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.toast-success {
+    background: #064e3b;
+    border-color: #059669;
+    color: #6ee7b7;
+}
+
+.toast-info {
+    background: #1e3a8a;
+    border-color: #3b82f6;
+    color: #93c5fd;
+}
+
+.toast-icon {
+    font-size: 1rem;
+}
+
+.toast-message {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+/* ── Cached View Banner ── */
+.cached-banner {
+    background: linear-gradient(135deg, #1e3a8a 0%, #312e81 100%);
+    color: white;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.cached-icon {
+    font-size: 1.2rem;
+}
+
+.cached-text {
+    flex: 1;
+    font-size: 0.9rem;
+}
+
+.cached-close {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.cached-close:hover {
+    opacity: 1;
+}
+
+/* ── Offline Mode ── */
+body.offline-mode .edit-btn,
+body.offline-mode .action-btn,
+body.offline-mode [data-mutation],
+body.offline-mode form {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+body.offline-mode .folder-card {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
 
 /* ── Main ── */
 main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
@@ -943,5 +1139,20 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
 
     .gallery-thumbs {
         flex-wrap: wrap;
+    }
+    
+    /* Mobile adjustments for offline banner */
+    .offline-content {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .offline-banner {
+        padding: 0.5rem;
+    }
+    
+    /* Mobile connection status */
+    .connection-status {
+        font-size: 0.7rem;
     }
 }
