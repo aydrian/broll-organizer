@@ -39,6 +39,26 @@ uv sync
 uv run broll search "QUERY" --drive /media/openclaw/Crucial\ X10 --limit 10
 ```
 
+### Search with contact sheet grid
+```bash
+uv run broll search "tokyo sunset" --drive /media/openclaw/Crucial\ X10 --grid 3x3
+```
+
+### Search with HTML gallery export
+```bash
+uv run broll search "tokyo" --drive /media/openclaw/Crucial\ X10 --export-gallery /tmp/tokyo-gallery.html
+```
+
+### Get video thumbnail path
+```bash
+uv run broll thumbnail --id 42 --drive /media/openclaw/Crucial\ X10
+```
+
+### Get thumbnail as base64 (for embedding)
+```bash
+uv run broll thumbnail --id 42 --drive /media/openclaw/Crucial\ X10 --base64
+```
+
 ### Get video by ID
 ```bash
 uv run broll search --drive /media/openclaw/Crucial\ X10 --video-id 42
