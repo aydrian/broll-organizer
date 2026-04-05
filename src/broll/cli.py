@@ -360,7 +360,7 @@ def web(drive_path: str, port: int, host: str):
     click.echo(f"\n🎬 B-Roll Catalog Web UI")
     click.echo(f"  Local:    http://{host}:{port}")
     
-    # Try to detect Tailscale IP
+    # Try to detect Tailscale IP and hostname
     if host == "0.0.0.0":
         try:
             # Look for tailscale0 interface
@@ -376,6 +376,21 @@ def web(drive_path: str, port: int, host: str):
                 if match:
                     tailscale_ip = match.group(1)
                     click.echo(f"  Tailscale: http://{tailscale_ip}:{port}")
+            
+            # Try to get MagicDNS hostname
+            magic_result = subprocess.run(
+                ["tailscale", "status", "--json"],
+                capture_output=True,
+                text=True
+            )
+            if magic_result.returncode == 0:
+                import json
+                status = json.loads(magic_result.stdout)
+                self_dns = status.get("Self", {}).get("DNSName", "")
+                if self_dns:
+                    # Remove trailing dot if present
+                    hostname = self_dns.rstrip(".")
+                    click.echo(f"  MagicDNS:  http://{hostname}:{port}")
         except Exception:
             pass
         click.echo(f"  (Accessible from other devices on your Tailscale network)")
