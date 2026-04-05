@@ -5,10 +5,7 @@
 {% block content %}
 <div class="detail-layout">
     <div class="detail-player">
-        <video controls preload="metadata" playsinline>
-            <source src="/video/stream/{{ video.id }}" type="video/mp4">
-            Your browser does not support video playback.
-        </video>
+        <div id="videoPlayerContainer"></div>
     </div>
 
     <div class="detail-info">
@@ -134,75 +131,6 @@
             {% endif %}
         </div>
 
-        <script>
-            document.addEventListener('DOMContentLoaded', () => {
-                const editBtn = document.getElementById('edit-location-btn');
-                const container = document.getElementById('location-edit-container');
-                const input = document.getElementById('location-search-input');
-                const resultsDiv = document.getElementById('location-results');
-                let debounceTimer;
-
-                editBtn.addEventListener('click', () => {
-                    container.style.display = container.style.display === 'none' ? 'block' : 'none';
-                    if (container.style.display === 'block') {
-                        input.focus();
-                    }
-                });
-
-                input.addEventListener('input', (e) => {
-                    clearTimeout(debounceTimer);
-                    const query = e.target.value.trim();
-
-                    if (!query) {
-                        resultsDiv.innerHTML = '';
-                        return;
-                    }
-
-                    debounceTimer = setTimeout(() => {
-                        fetch(`/api/location/search?q=${encodeURIComponent(query)}`)
-                            .then(res => res.json())
-                            .then(data => {
-                                resultsDiv.innerHTML = '';
-                                if (data.error) {
-                                    resultsDiv.innerHTML = `<div class="error">${data.error}</div>`;
-                                    return;
-                                }
-
-                                data.forEach(item => {
-                                    const div = document.createElement('div');
-                                    div.className = 'location-result-item';
-                                    div.textContent = item.name;
-                                    div.addEventListener('click', () => saveLocation(item));
-                                    resultsDiv.appendChild(div);
-                                });
-                            })
-                            .catch(err => {
-                                resultsDiv.innerHTML = '<div class="error">Search failed</div>';
-                            });
-                    }, 500);
-                });
-
-                function saveLocation(item) {
-                    fetch(`/api/video/{{ video.id }}/location`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(item),
-                    })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                window.location.reload();
-                            } else {
-                                alert('Failed to update location');
-                            }
-                        })
-                        .catch(err => alert('Error saving location'));
-                }
-            });
-        </script>
-
         <style>
             .btn-text {
                 background: none;
@@ -245,4 +173,93 @@
 <div class="detail-back">
     <a href="javascript:history.back()">&laquo; Back to Browse</a>
 </div>
+
+<script src="{{ url_for('static', filename='video_player.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // Initialize the enhanced video player
+        const playerContainer = document.getElementById('videoPlayerContainer');
+        const videoMetadata = {
+            file_name: {{ video.file_name | tojson }},
+            tags: {{ video.tags | tojson }},
+            mood: {{ video.mood | tojson }},
+            fps: {{ video.fps | default(30) }}
+        };
+
+        const player = new VideoPlayer(playerContainer, {{ video.id }}, {
+            videoSrc: '/video/stream/{{ video.id }}',
+            fps: videoMetadata.fps || 30,
+            metadata: videoMetadata,
+            onTrim: (trimData) => {
+                console.log('Trim changed:', trimData);
+            }
+        });
+
+        // Location editing functionality
+        const editBtn = document.getElementById('edit-location-btn');
+        const container = document.getElementById('location-edit-container');
+        const input = document.getElementById('location-search-input');
+        const resultsDiv = document.getElementById('location-results');
+        let debounceTimer;
+
+        editBtn.addEventListener('click', () => {
+            container.style.display = container.style.display === 'none' ? 'block' : 'none';
+            if (container.style.display === 'block') {
+                input.focus();
+            }
+        });
+
+        input.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            const query = e.target.value.trim();
+
+            if (!query) {
+                resultsDiv.innerHTML = '';
+                return;
+            }
+
+            debounceTimer = setTimeout(() => {
+                fetch(`/api/location/search?q=${encodeURIComponent(query)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        resultsDiv.innerHTML = '';
+                        if (data.error) {
+                            resultsDiv.innerHTML = `<div class="error">${data.error}</div>`;
+                            return;
+                        }
+
+                        data.forEach(item => {
+                            const div = document.createElement('div');
+                            div.className = 'location-result-item';
+                            div.textContent = item.name;
+                            div.addEventListener('click', () => saveLocation(item));
+                            resultsDiv.appendChild(div);
+                        });
+                    })
+                    .catch(err => {
+                        resultsDiv.innerHTML = '<div class="error">Search failed</div>';
+                    });
+            }, 500);
+        });
+
+        function saveLocation(item) {
+            fetch(`/api/video/{{ video.id }}/location`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(item),
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Failed to update location');
+                    }
+                })
+                .catch(err => alert('Error saving location'));
+        }
+    });
+</script>
 {% endblock %}

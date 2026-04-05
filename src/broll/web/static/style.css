@@ -574,6 +574,500 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
 .detail-back { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 
 /* ═════════════════════════════════════════════════════════════════
+   Professional Video Player Styles
+   ═════════════════════════════════════════════════════════════════ */
+
+.video-player-container {
+    position: relative;
+    background: #000;
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.video-wrapper {
+    position: relative;
+    aspect-ratio: 16/9;
+    background: #000;
+}
+
+.video-element {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* Metadata Overlay */
+.metadata-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 1rem;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+    opacity: 1;
+    transition: opacity 0.3s;
+    pointer-events: none;
+}
+
+.metadata-overlay.visible {
+    opacity: 1;
+}
+
+.video-player-container:hover .metadata-overlay,
+.video-player-container.fullscreen .metadata-overlay {
+    opacity: 1;
+}
+
+.metadata-content {
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+.metadata-filename {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+}
+
+.metadata-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-bottom: 0.25rem;
+}
+
+.metadata-tag {
+    background: rgba(59, 130, 246, 0.8);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+}
+
+.metadata-mood {
+    font-size: 0.8rem;
+    opacity: 0.9;
+}
+
+/* Loading Indicator */
+.loading-indicator {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.loading-indicator.visible {
+    opacity: 1;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255,255,255,0.3);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+/* Player Controls */
+.player-controls {
+    background: var(--bg-card);
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.controls-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.controls-row:last-child {
+    margin-bottom: 0;
+}
+
+.time-display-row {
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.trim-indicators {
+    color: var(--accent);
+    font-size: 0.75rem;
+}
+
+/* Scrubber */
+.scrubber-container {
+    position: relative;
+    height: 24px;
+    display: flex;
+    align-items: center;
+}
+
+.scrubber-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background: var(--bg-hover);
+    border-radius: 3px;
+    overflow: visible;
+}
+
+.scrubber-buffered {
+    position: absolute;
+    left: 0;
+    height: 100%;
+    background: var(--text-dim);
+    border-radius: 3px;
+    width: 0%;
+}
+
+.trim-region {
+    position: absolute;
+    height: 100%;
+    background: rgba(59, 130, 246, 0.3);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.trim-region.active {
+    opacity: 1;
+}
+
+.scrubber-progress {
+    position: absolute;
+    left: 0;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    width: 0%;
+    pointer-events: none;
+}
+
+/* Trim Handles */
+.trim-handle {
+    position: absolute;
+    top: -9px;
+    width: 12px;
+    height: 24px;
+    background: var(--accent);
+    border-radius: 2px;
+    cursor: col-resize;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transform: translateX(-50%);
+    transition: background 0.15s, transform 0.15s;
+    z-index: 10;
+}
+
+.trim-handle:hover {
+    background: var(--accent-hover);
+    transform: translateX(-50%) scale(1.1);
+}
+
+.trim-handle.active {
+    background: #22c55e;
+}
+
+.trim-handle-in {
+    left: 0%;
+}
+
+.trim-handle-out {
+    left: 100%;
+}
+
+.trim-handle-in:not(.active) {
+    opacity: 0.3;
+}
+
+.trim-handle-out:not(.active) {
+    opacity: 0.3;
+}
+
+.handle-marker {
+    color: white;
+    font-size: 8px;
+    margin-top: 2px;
+}
+
+.handle-label {
+    color: white;
+    font-size: 7px;
+    font-weight: 600;
+    margin-top: -2px;
+}
+
+/* Range Input (Scrubber) */
+.scrubber-input {
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    margin: 0;
+}
+
+/* Main Controls */
+.main-controls {
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.left-controls {
+    flex: 1;
+    justify-content: flex-start;
+}
+
+.center-controls {
+    flex: 0 0 auto;
+}
+
+.right-controls {
+    flex: 1;
+    justify-content: flex-end;
+}
+
+/* Control Buttons */
+.control-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.15s;
+    padding: 0;
+}
+
+.control-btn:hover {
+    background: var(--bg-input);
+    border-color: var(--accent);
+}
+
+.control-btn:active {
+    transform: scale(0.95);
+}
+
+.control-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.control-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* Trim Buttons */
+.trim-btn {
+    font-size: 0.8rem;
+    font-weight: 600;
+    gap: 2px;
+}
+
+.trim-btn-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+}
+
+/* Play/Pause Button */
+#playPauseBtn .icon-pause,
+.video-player-container.playing #playPauseBtn .icon-play {
+    display: none;
+}
+
+.video-player-container.playing #playPauseBtn .icon-pause {
+    display: inline;
+}
+
+/* Volume Control */
+.volume-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#muteBtn .icon-mute,
+#muteBtn.muted .icon-volume {
+    display: none;
+}
+
+#muteBtn.muted .icon-mute {
+    display: inline;
+}
+
+.volume-slider {
+    width: 80px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-hover);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+.volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.volume-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+/* Playback Speed */
+.speed-select {
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.85rem;
+    cursor: pointer;
+    outline: none;
+}
+
+.speed-select:hover {
+    border-color: var(--accent);
+}
+
+.speed-select:focus {
+    border-color: var(--accent);
+}
+
+/* Loop Button */
+#loopBtn.active .loop-icon {
+    color: #22c55e;
+}
+
+/* Fullscreen Styles */
+.video-player-container.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.video-player-container.fullscreen .video-wrapper {
+    flex: 1;
+    aspect-ratio: auto;
+}
+
+.video-player-container.fullscreen .player-controls {
+    background: rgba(15, 15, 15, 0.95);
+}
+
+/* Frame Indicator Animation */
+.frame-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.5);
+    font-size: 4rem;
+    color: rgba(255,255,255,0.8);
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    opacity: 0;
+    transition: all 0.2s;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.frame-indicator.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+/* Notifications */
+.player-notification {
+    position: absolute;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(34, 197, 94, 0.9);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    font-weight: 500;
+    opacity: 0;
+    transition: all 0.3s;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.player-notification.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .main-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .control-group {
+        justify-content: center;
+    }
+    
+    .left-controls,
+    .right-controls {
+        flex: none;
+        justify-content: center;
+    }
+    
+    .volume-slider {
+        width: 60px;
+    }
+}
+
+/* ═════════════════════════════════════════════════════════════════
    Map View Styles
    ═════════════════════════════════════════════════════════════════ */
 
