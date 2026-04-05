@@ -4,11 +4,11 @@
 
 {% block content %}
 <div class="browse-header">
-    <form action="/search" method="get" class="search-form">
-        <input type="text" name="q" placeholder="Search your clips..." autocomplete="off">
-        <button type="submit">Search</button>
+    <form action="/search" method="get" class="search-form" role="search" aria-label="Search videos">
+        <input type="text" name="q" placeholder="Search your clips..." autocomplete="off" aria-label="Search query">
+        <button type="submit" aria-label="Search">Search</button>
     </form>
-    <div class="stats-bar">
+    <div class="stats-bar" role="status" aria-label="Library statistics">
         {{ stats.total_videos }} clips |
         {{ stats.analyzed_count }} analyzed |
         {{ stats.geotagged_count }} geotagged |
@@ -16,67 +16,32 @@
     </div>
 </div>
 
-    <!-- Batch Actions Toolbar -->
-    <div id="batch-toolbar" class="batch-toolbar">
-        <div class="batch-left">
-            <span class="batch-count"><span id="selection-count">0</span> selected</span>
-            <button id="select-all-btn" class="batch-btn">Select All</button>
-            <button id="deselect-all-btn" class="batch-btn" style="display: none;">Deselect All</button>
-        </div>
-        <div class="batch-actions">
-            <div class="dropdown">
-                <button id="add-to-playlist-btn" class="batch-btn dropdown-toggle">
-                    + Playlist ▼
-                </button>
-                <div id="playlist-dropdown" class="dropdown-menu">
-                    <div class="dropdown-header">Existing Playlists</div>
-                    <div id="playlist-list"></div>
-                    <div class="dropdown-divider"></div>
-                    <input type="text" id="new-playlist-name" placeholder="New playlist name...">
-                    <button id="create-playlist-btn" class="dropdown-btn">Create & Add</button>
-                </div>
-            </div>
-            <button id="export-btn" class="batch-btn">Export</button>
-            <button id="download-thumbs-btn" class="batch-btn">Thumbnails</button>
-            <button id="batch-location-btn" class="batch-btn">Set Location</button>
-            <button id="clear-selection-btn" class="batch-btn batch-btn-secondary">Clear</button>
-        </div>
-    </div>
+    <!-- Filter toggle button for mobile -->
+    <button type="button" class="filter-toggle-btn" id="filter-toggle" aria-label="Show filters" aria-expanded="false">
+        <span aria-hidden="true">⚙️</span> Filters
+    </button>
 
-    <div id="breadcrumbs" class="breadcrumbs"></div>
 
-    <div id="folder-grid" class="folder-grid"></div>
+    <nav id="breadcrumbs" class="breadcrumbs" aria-label="Breadcrumb navigation"></nav>
 
-    <div id="video-grid" class="video-grid"></div>
+    <div id="folder-grid" class="folder-grid" role="list" aria-label="Folders"></div>
+
+    <div id="video-grid" class="video-grid" role="feed" aria-label="Video clips"></div>
     
-    <div id="loader" class="loader">Loading...</div>
-    <div id="sentinel" class="sentinel"></div>
+    <div id="loader" class="loader" role="status" aria-live="polite">Loading...</div>
+    <div id="sentinel" class="sentinel" aria-hidden="true"></div>
+    
+    <!-- Multi-select toolbar for mobile -->
+    <div class="multi-select-toolbar" id="multi-select-toolbar" role="toolbar" aria-label="Selection actions">
+        <span class="multi-select-count" id="selected-count">0 selected</span>
+        <div class="multi-select-actions">
+            <button type="button" class="multi-select-btn secondary" id="cancel-selection" aria-label="Cancel selection">
+                Cancel
+            </button>
+            <button type="button" class="multi-select-btn" id="add-to-playlist" aria-label="Add selected to playlist">
+                <span aria-hidden="true">+</span> Playlist
+            </button>
 
-    <!-- Batch Location Modal -->
-    <div id="batch-location-modal" class="modal hidden">
-        <div class="modal-content">
-            <h3>Set Location for Selected Videos</h3>
-            <input type="text" id="batch-location-search" placeholder="Search for a location...">
-            <div id="batch-location-results" class="location-results"></div>
-            <div class="modal-actions">
-                <button id="batch-location-cancel" class="btn-secondary">Cancel</button>
-                <button id="batch-location-confirm" class="btn-primary" disabled>Set Location</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Export Modal -->
-    <div id="export-modal" class="modal hidden">
-        <div class="modal-content">
-            <h3>Export Selected Videos</h3>
-            <div class="export-options">
-                <label><input type="radio" name="export-format" value="csv" checked> CSV (spreadsheet)</label>
-                <label><input type="radio" name="export-format" value="txt"> TXT (simple list)</label>
-            </div>
-            <div class="modal-actions">
-                <button id="export-cancel" class="btn-secondary">Cancel</button>
-                <button id="export-confirm" class="btn-primary">Export</button>
-            </div>
         </div>
     </div>
 {% endblock %}

@@ -4,77 +4,74 @@
 
 {% block content %}
 <div class="detail-layout">
-    <div class="detail-player">
-        <video controls preload="metadata" playsinline>
-            <source src="/video/stream/{{ video.id }}" type="video/mp4">
-            Your browser does not support video playback.
-        </video>
+    <div class="detail-player" role="region" aria-label="Video player">
+        <div id="videoPlayerContainer" role="application" aria-label="Video player controls"></div>
     </div>
 
-    <div class="detail-info">
-        <h2>{{ video.file_name }}</h2>
-        <div class="detail-path">{{ video.file_path }}</div>
+    <div class="detail-info" role="complementary" aria-label="Video information">
+        <h2 id="video-title">{{ video.file_name }}</h2>
+        <div class="detail-path" aria-label="File location">{{ video.file_path }}</div>
 
         {% if video.scene_description and not video.scene_description.startswith("ERROR") %}
         <div class="detail-section">
-            <h3>Description</h3>
-            <p>{{ video.scene_description }}</p>
+            <h3 id="desc-heading">Description</h3>
+            <p aria-labelledby="desc-heading">{{ video.scene_description }}</p>
         </div>
         {% endif %}
 
         {% if video.tags %}
         <div class="detail-section">
-            <h3>Tags</h3>
-            <div class="card-tags">
+            <h3 id="tags-heading">Tags</h3>
+            <div class="card-tags" role="list" aria-labelledby="tags-heading">
                 {% for tag in video.tags | parse_tags %}
-                <span class="tag">{{ tag }}</span>
+                <span class="tag" role="listitem">{{ tag }}</span>
                 {% endfor %}
             </div>
         </div>
         {% endif %}
 
         <div class="detail-section">
-            <h3>Technical</h3>
-            <table class="detail-table">
+            <h3 id="tech-heading">Technical</h3>
+            <table class="detail-table" aria-labelledby="tech-heading">
                 {% if video.duration_seconds %}
                 <tr>
-                    <td>Duration</td>
+                    <th scope="row">Duration</th>
                     <td>{{ video.duration_seconds | duration }}</td>
                 </tr>
                 {% endif %}
                 {% if video.resolution %}
                 <tr>
-                    <td>Resolution</td>
+                    <th scope="row">Resolution</th>
                     <td>{{ video.resolution }}</td>
                 </tr>
                 {% endif %}
                 {% if video.fps %}
                 <tr>
-                    <td>Frame Rate</td>
+                    <th scope="row">Frame Rate</th>
                     <td>{{ video.fps }} fps</td>
                 </tr>
                 {% endif %}
                 {% if video.codec %}
                 <tr>
-                    <td>Codec</td>
+                    <th scope="row">Codec</th>
                     <td>{{ video.codec }}</td>
                 </tr>
                 {% endif %}
                 {% if video.file_size %}
                 <tr>
-                    <td>File Size</td>
+                    <th scope="row">File Size</th>
                     <td>{{ video.file_size | filesize }}</td>
                 </tr>
                 {% endif %}
                 {% if video.source_device %}
                 <tr>
-                    <td>Device</td>
+                    <th scope="row">Device</th>
                     <td>{{ video.source_device }}</td>
                 </tr>
                 {% endif %}
                 {% if video.creation_date %}
                 <tr>
-                    <td>Date</td>
+                    <th scope="row">Date</th>
                     <td>{{ video.creation_date }}</td>
                 </tr>
                 {% endif %}
@@ -82,23 +79,23 @@
         </div>
 
         <div class="detail-section">
-            <h3>Analysis</h3>
-            <table class="detail-table">
+            <h3 id="analysis-heading">Analysis</h3>
+            <table class="detail-table" aria-labelledby="analysis-heading">
                 {% if video.mood and video.mood != 'unknown' %}
                 <tr>
-                    <td>Mood</td>
+                    <th scope="row">Mood</th>
                     <td>{{ video.mood }}</td>
                 </tr>
                 {% endif %}
                 {% if video.camera_movement and video.camera_movement != 'unknown' %}
                 <tr>
-                    <td>Camera</td>
+                    <th scope="row">Camera</th>
                     <td>{{ video.camera_movement }}</td>
                 </tr>
                 {% endif %}
                 {% if video.time_of_day and video.time_of_day != 'unknown' %}
                 <tr>
-                    <td>Time of Day</td>
+                    <th scope="row">Time of Day</th>
                     <td>{{ video.time_of_day }}</td>
                 </tr>
                 {% endif %}
@@ -106,102 +103,33 @@
         </div>
 
         <div class="detail-section">
-            <h3>
+            <h3 id="location-heading">
                 Location
-                <button id="edit-location-btn" class="btn-text" title="Edit Location">✎</button>
+                <button id="edit-location-btn" class="btn-text" title="Edit Location" aria-label="Edit location" aria-expanded="false" aria-controls="location-edit-container">✎</button>
             </h3>
 
-            <div id="location-edit-container" style="display: none; margin-bottom: 1rem;">
+            <div id="location-edit-container" style="display: none; margin-bottom: 1rem;" role="search" aria-label="Search for location">
                 <div class="search-box">
                     <input type="text" id="location-search-input" placeholder="Search for a location..."
-                        autocomplete="off">
+                        autocomplete="off" aria-label="Location search query">
                 </div>
-                <div id="location-results" class="location-results"></div>
+                <div id="location-results" class="location-results" role="listbox" aria-label="Location search results"></div>
             </div>
 
             {% if video.gps_location_name %}
-            <p>{{ video.gps_location_name }}</p>
+            <p aria-label="Location name">{{ video.gps_location_name }}</p>
             {% endif %}
 
             {% if video.gps_latitude and video.gps_longitude %}
             <p>
                 <a href="https://www.google.com/maps?q={{ video.gps_latitude }},{{ video.gps_longitude }}"
-                    target="_blank" rel="noopener">
+                    target="_blank" rel="noopener" aria-label="View location on Google Maps">
                     View on Google Maps ({{ "%.5f" | format(video.gps_latitude) }}, {{ "%.5f" |
                     format(video.gps_longitude) }})
                 </a>
             </p>
             {% endif %}
         </div>
-
-        <script>
-            document.addEventListener('DOMContentLoaded', () => {
-                const editBtn = document.getElementById('edit-location-btn');
-                const container = document.getElementById('location-edit-container');
-                const input = document.getElementById('location-search-input');
-                const resultsDiv = document.getElementById('location-results');
-                let debounceTimer;
-
-                editBtn.addEventListener('click', () => {
-                    container.style.display = container.style.display === 'none' ? 'block' : 'none';
-                    if (container.style.display === 'block') {
-                        input.focus();
-                    }
-                });
-
-                input.addEventListener('input', (e) => {
-                    clearTimeout(debounceTimer);
-                    const query = e.target.value.trim();
-
-                    if (!query) {
-                        resultsDiv.innerHTML = '';
-                        return;
-                    }
-
-                    debounceTimer = setTimeout(() => {
-                        fetch(`/api/location/search?q=${encodeURIComponent(query)}`)
-                            .then(res => res.json())
-                            .then(data => {
-                                resultsDiv.innerHTML = '';
-                                if (data.error) {
-                                    resultsDiv.innerHTML = `<div class="error">${data.error}</div>`;
-                                    return;
-                                }
-
-                                data.forEach(item => {
-                                    const div = document.createElement('div');
-                                    div.className = 'location-result-item';
-                                    div.textContent = item.name;
-                                    div.addEventListener('click', () => saveLocation(item));
-                                    resultsDiv.appendChild(div);
-                                });
-                            })
-                            .catch(err => {
-                                resultsDiv.innerHTML = '<div class="error">Search failed</div>';
-                            });
-                    }, 500);
-                });
-
-                function saveLocation(item) {
-                    fetch(`/api/video/{{ video.id }}/location`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(item),
-                    })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                window.location.reload();
-                            } else {
-                                alert('Failed to update location');
-                            }
-                        })
-                        .catch(err => alert('Error saving location'));
-                }
-            });
-        </script>
 
         <style>
             .btn-text {
@@ -243,130 +171,96 @@
 </div>
 
 <div class="detail-back">
-    <a href="javascript:history.back()">&laquo; Back to Browse</a>
+    <a href="javascript:history.back()" aria-label="Go back to previous page">&laquo; Back to Browse</a>
 </div>
 
+<script src="{{ url_for('static', filename='video_player.js') }}"></script>
 <script>
-    // Video detail page keyboard shortcuts
     document.addEventListener('DOMContentLoaded', () => {
-        const video = document.querySelector('video');
-        const playerContainer = document.querySelector('.detail-player');
-        
-        if (!video) return;
+        // Initialize the enhanced video player
+        const playerContainer = document.getElementById('videoPlayerContainer');
+        const videoMetadata = {
+            file_name: {{ video.file_name | tojson }},
+            tags: {{ video.tags | tojson }},
+            mood: {{ video.mood | tojson }},
+            fps: {{ video.fps | default(30) }}
+        };
 
-        // Make player focusable
-        playerContainer.setAttribute('tabindex', '0');
+        const player = new VideoPlayer(playerContainer, {{ video.id }}, {
+            videoSrc: '/video/stream/{{ video.id }}',
+            fps: videoMetadata.fps || 30,
+            metadata: videoMetadata,
+            onTrim: (trimData) => {
+                console.log('Trim changed:', trimData);
+            }
+        });
 
-        document.addEventListener('keydown', (e) => {
-            // Don't trigger when typing in inputs
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        // Location editing functionality
+        const editBtn = document.getElementById('edit-location-btn');
+        const container = document.getElementById('location-edit-container');
+        const input = document.getElementById('location-search-input');
+        const resultsDiv = document.getElementById('location-results');
+        let debounceTimer;
+
+        editBtn.addEventListener('click', () => {
+            container.style.display = container.style.display === 'none' ? 'block' : 'none';
+            if (container.style.display === 'block') {
+                input.focus();
+            }
+        });
+
+        input.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            const query = e.target.value.trim();
+
+            if (!query) {
+                resultsDiv.innerHTML = '';
                 return;
             }
 
-            switch (e.key) {
-                case ' ':
-                    e.preventDefault();
-                    if (video.paused) {
-                        video.play();
-                    } else {
-                        video.pause();
-                    }
-                    break;
-                case 'ArrowLeft':
-                    e.preventDefault();
-                    video.currentTime = Math.max(0, video.currentTime - 5);
-                    break;
-                case 'ArrowRight':
-                    e.preventDefault();
-                    video.currentTime = Math.min(video.duration, video.currentTime + 5);
-                    break;
-                case 'f':
-                case 'F':
-                    e.preventDefault();
-                    if (document.fullscreenElement) {
-                        document.exitFullscreen();
-                    } else {
-                        video.requestFullscreen();
-                    }
-                    break;
-                case 'm':
-                case 'M':
-                    e.preventDefault();
-                    video.muted = !video.muted;
-                    break;
-                case '?':
-                    e.preventDefault();
-                    showVideoHelp();
-                    break;
-                case 'Escape':
-                    hideVideoHelp();
-                    break;
-            }
+            debounceTimer = setTimeout(() => {
+                fetch(`/api/location/search?q=${encodeURIComponent(query)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        resultsDiv.innerHTML = '';
+                        if (data.error) {
+                            resultsDiv.innerHTML = `<div class="error">${data.error}</div>`;
+                            return;
+                        }
+
+                        data.forEach(item => {
+                            const div = document.createElement('div');
+                            div.className = 'location-result-item';
+                            div.textContent = item.name;
+                            div.addEventListener('click', () => saveLocation(item));
+                            resultsDiv.appendChild(div);
+                        });
+                    })
+                    .catch(err => {
+                        resultsDiv.innerHTML = '<div class="error">Search failed</div>';
+                    });
+            }, 500);
         });
 
-        // Click to focus player for keyboard controls
-        playerContainer.addEventListener('click', () => {
-            playerContainer.focus();
-        });
-
-        // Create help modal if not exists
-        function showVideoHelp() {
-            let modal = document.getElementById('video-help-modal');
-            if (!modal) {
-                modal = document.createElement('div');
-                modal.id = 'video-help-modal';
-                modal.className = 'modal hidden';
-                modal.innerHTML = `
-                    <div class="modal-content keyboard-help-content">
-                        <h3>Video Player Shortcuts</h3>
-                        <div class="keyboard-shortcuts-list">
-                            <div class="shortcut-item">
-                                <kbd>Space</kbd>
-                                <span>Play / Pause</span>
-                            </div>
-                            <div class="shortcut-item">
-                                <kbd>←</kbd> / <kbd>→</kbd>
-                                <span>Seek -5s / +5s</span>
-                            </div>
-                            <div class="shortcut-item">
-                                <kbd>f</kbd>
-                                <span>Fullscreen</span>
-                            </div>
-                            <div class="shortcut-item">
-                                <kbd>m</kbd>
-                                <span>Mute / Unmute</span>
-                            </div>
-                            <div class="shortcut-item">
-                                <kbd>?</kbd>
-                                <span>Show this help</span>
-                            </div>
-                            <div class="shortcut-item">
-                                <kbd>Esc</kbd>
-                                <span>Close help / Exit fullscreen</span>
-                            </div>
-                        </div>
-                        <div class="modal-actions">
-                            <button class="btn-primary" onclick="document.getElementById('video-help-modal').classList.add('hidden')">Got it</button>
-                        </div>
-                    </div>
-                `;
-                document.body.appendChild(modal);
-            }
-            modal.classList.remove('hidden');
+        function saveLocation(item) {
+            fetch(`/api/video/{{ video.id }}/location`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(item),
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Failed to update location');
+                    }
+                })
+                .catch(err => alert('Error saving location'));
         }
 
-        function hideVideoHelp() {
-            const modal = document.getElementById('video-help-modal');
-            if (modal) {
-                modal.classList.add('hidden');
-            }
-        }
-
-        // Add keyboard hint
-        const hint = document.createElement('div');
-        hint.className = 'keyboard-hint';
-        hint.innerHTML = 'Press <kbd>?</kbd> for keyboard shortcuts';
-        document.body.appendChild(hint);
     });
 </script>
 {% endblock %}
