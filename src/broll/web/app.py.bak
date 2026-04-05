@@ -198,8 +198,7 @@ def create_app(drive_path: str) -> Flask:
         folders = []
         for row in folder_rows:
             name = row[0]
-            # Skip nulls, empty strings, the current path itself, paths with slashes, and video files
-            if name and name != folder_path and "/" not in name and not name.endswith('.MP4'):
+            if name and name != folder_path and "/" not in name:
                 folders.append({"name": name, "path": (folder_path + "/" + name).strip("/")})
 
         # Get videos in this folder
