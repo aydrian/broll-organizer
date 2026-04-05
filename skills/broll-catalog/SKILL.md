@@ -5,14 +5,14 @@ description: Query and search Aydrian's B-roll video catalog stored on external 
 
 # B-Roll Catalog Skill
 
-Query Aydrian's B-roll footage catalog stored on external drives.
+Query Aydrian's B-roll footage catalog stored on external drives using the `broll` CLI.
 
 ## Quick Start
 
-Use the query script to search:
+Use the broll CLI to search:
 
 ```bash
-python3 scripts/query_catalog.py search -q "tokyo sunset"
+uv run broll search "tokyo sunset" --drive /media/openclaw/Crucial\ X10
 ```
 
 ## Key Facts
@@ -23,75 +23,99 @@ python3 scripts/query_catalog.py search -q "tokyo sunset"
 - **Current Catalog:** Japan 2025-26 footage (293 videos across 12 locations)
 - **Important:** Osmo Pocket 3 does NOT encode GPS data — location is inferred from folder names
 
-## Folder-Based Location Mapping
+## Prerequisites
 
-Since videos lack GPS metadata, location is derived from parent folder names:
+The `broll` CLI must be installed from the main repo:
 
-| Folder | Inferred Location |
-|--------|-------------------|
-| `01 Kusatsu Onsen` | Kusatsu Onsen |
-| `02 Tokyo Disneyland` | Tokyo Disneyland |
-| `03 Tokyo Disney Sea` | Tokyo Disney Sea |
-| `04 Fukuoka` | Fukuoka |
-| `05 Driving to Nagasaki` | Nagasaki (road trip) |
-| `06 Nagasaki` | Nagasaki |
-| `07 Kumamoto` | Kumamoto |
-| `08 Takachiho` | Takachiho |
-| `09 Mt Aso` | Mt Aso |
-| `10 Beppu` | Beppu |
-| `11 Okayama` | Okayama |
-| `12 Himeji` | Himeji |
+```bash
+cd ~/broll-organizer
+uv sync
+```
 
 ## Commands
 
 ### Search by keyword
 ```bash
-python3 scripts/query_catalog.py search -q "QUERY" --limit 10
+uv run broll search "QUERY" --drive /media/openclaw/Crucial\ X10 --limit 10
 ```
 
 ### Get video by ID
 ```bash
-python3 scripts/query_catalog.py video -i 42
+uv run broll search --drive /media/openclaw/Crucial\ X10 --video-id 42
 ```
 
 ### Search by location
 ```bash
-python3 scripts/query_catalog.py location -l "Beppu"
+uv run broll search --drive /media/openclaw/Crucial\ X10 --location "Beppu"
 ```
 
-### List all videos
+### Get catalog stats (basic)
 ```bash
-python3 scripts/query_catalog.py list --limit 20
+uv run broll stats /media/openclaw/Crucial\ X10
 ```
 
-### Get catalog stats
+### Get detailed stats with location breakdown
 ```bash
-python3 scripts/query_catalog.py stats
+uv run broll stats /media/openclaw/Crucial\ X10 --detailed
 ```
 
-### Get thumbnail path
+### Get timeline of videos by month
 ```bash
-python3 scripts/query_catalog.py thumbnail -i 42
+uv run broll stats /media/openclaw/Crucial\ X10 --timeline
+```
+
+### Find videos missing metadata
+```bash
+uv run broll stats /media/openclaw/Crucial\ X10 --missing-metadata
+```
+
+### Run health check (doctor)
+```bash
+uv run broll doctor /media/openclaw/Crucial\ X10
+```
+
+### Check for specific issues
+```bash
+uv run broll doctor /media/openclaw/Crucial\ X10 --thumbnails    # Missing thumbnails
+uv run broll doctor /media/openclaw/Crucial\ X10 --orphaned      # Orphaned records
+uv run broll doctor /media/openclaw/Crucial\ X10 --hashes        # Hash mismatches
+```
+
+### Fix issues automatically
+```bash
+uv run broll doctor /media/openclaw/Crucial\ X10 --fix
+```
+
+### Launch web UI for browsing
+```bash
+uv run broll web /media/openclaw/Crucial\ X10
 ```
 
 ## Workflow: Finding Clips for Content
 
-1. **Search with keywords:** Use `search` with descriptive terms like "onsen steam", "disney castle", "mountain sunset"
-2. **Narrow by location:** If you know the place, use `location` command
-3. **Get details:** Use `video -i ID` to see full metadata
-4. **View thumbnail:** Use `thumbnail -i ID` to get path, then read the image
-5. **Pull the clip:** Use the `file_path` from video details to access the actual video file
+1. **Search with keywords:** Use natural language like "onsen steam", "disney castle", "mountain sunset"
+2. **Narrow by location:** Use `--location` flag with place names
+3. **Browse visually:** Launch the web UI with `broll web` for grid view and thumbnails
+4. **Get details:** Use search with `--video-id` for full metadata
+5. **Access files:** Use the `file_path` from results to locate the actual video
 
-## Database Details
+## Workflow: Catalog Maintenance
 
-See [references/database_schema.md](references/database_schema.md) for full schema and example queries.
+1. **Check catalog health:** Run `broll doctor` to find missing files, orphaned records, or hash mismatches
+2. **View detailed stats:** Use `broll stats --detailed` to see breakdown by location
+3. **Find gaps:** Use `broll stats --missing-metadata` to identify videos needing reprocessing
+4. **Fix issues:** Run `broll doctor --fix` to auto-cleanup orphaned entries
 
 ## Output Format
 
-All query commands output JSON by default. Parse with `jq` or use `--format text` for human-readable output.
+CLI commands output JSON by default. Parse with `jq` or add for human-readable:
+```bash
+uv run broll search "tokyo" --format text
+```
 
 ## Troubleshooting
 
 - **"Database not found"** — Check if the Crucial X10 drive is mounted at `/media/openclaw/Crucial X10`
+- **"command not found"** — Run `uv sync` from the broll-organizer directory
 - **Empty results** — Try broader search terms; catalog may need processing with `broll process`
 - **Missing thumbnails** — Thumbnails are generated during processing; not all videos may have them yet
