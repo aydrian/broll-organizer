@@ -1190,3 +1190,39 @@ def export(playlist_id: int, drive: str, format: str, output: str | None):
         click.echo(f"  Format: {format}")
         click.echo(f"  Videos: {len(videos)}")
 
+
+# =============================================================================
+# Migrate Command
+# =============================================================================
+
+@cli.command()
+@click.argument('drive_path', type=click.Path(exists=True, file_okay=False))
+@click.option('--show-status', is_flag=True, help='Show current migration status without running migrations')
+def migrate(drive_path: str, show_status: bool):
+    """Run database migrations for the specified drive."""
+    drive = Path(drive_path)
+    db_path = get_db_path(drive)
+    
+    # Ensure .broll directory exists
+    app_dir = db_path.parent
+    app_dir.mkdir(parents=True, exist_ok=True)
+    
+    if show_status:
+        click.echo(f"Migration status for {drive_path}:")
+        status = _get_migration_status(drive)
+        if status:
+            click.echo(f"  {status}")
+        else:
+            click.echo("  No migrations applied yet")
+        return
+    
+    click.echo(f"Running migrations for {drive_path}...")
+    
+    if _run_migrations(drive):
+        click.echo(f"Migrations complete")
+        status = _get_migration_status(drive)
+        if status:
+            click.echo(f"   Current: {status}")
+    else:
+        click.echo("Migration failed", err=True)
+        raise SystemExit(1)
