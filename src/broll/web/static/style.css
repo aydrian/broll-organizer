@@ -19,7 +19,7 @@
     --green: #22c55e;
     --red: #ef4444;
     --orange: #f59e0b;
-    --focus-ring: #3b82f6;
+
     --radius: 8px;
 }
 
@@ -173,6 +173,200 @@ a:hover, a:focus-visible { color: var(--accent-hover); }
 .bottom-nav-item:hover, .bottom-nav-item.active {
     color: var(--accent);
     background: var(--bg-hover);
+}
+
+.nav-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* ── Connection Status Indicator ── */
+.connection-status {
+    font-size: 0.8rem;
+    font-weight: 500;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    transition: all 0.3s ease;
+    cursor: help;
+}
+
+.connection-status.online {
+    color: var(--green);
+}
+
+.connection-status.offline {
+    color: var(--red);
+    animation: pulse-offline 2s infinite;
+}
+
+@keyframes pulse-offline {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ── Offline Banner ── */
+.offline-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #7c2d12 0%, #9a3412 100%);
+    color: white;
+    padding: 0.75rem 1rem;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.offline-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.offline-icon {
+    font-size: 1.2rem;
+}
+
+.offline-text {
+    font-weight: 600;
+}
+
+.offline-banner .retry-btn,
+.offline-banner .cached-btn {
+    padding: 0.4rem 0.75rem;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.offline-banner .retry-btn {
+    background: white;
+    color: #7c2d12;
+}
+
+.offline-banner .retry-btn:hover {
+    background: #f3f4f6;
+}
+
+.offline-banner .retry-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.offline-banner .cached-btn {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+}
+
+.offline-banner .cached-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* ── Toast Notifications ── */
+.toast {
+    position: fixed;
+    top: 70px;
+    right: 1rem;
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    z-index: 1001;
+    transform: translateX(calc(100% + 2rem));
+    opacity: 0;
+    transition: all 0.3s ease;
+}
+
+.toast.show {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.toast-success {
+    background: #064e3b;
+    border-color: #059669;
+    color: #6ee7b7;
+}
+
+.toast-info {
+    background: #1e3a8a;
+    border-color: #3b82f6;
+    color: #93c5fd;
+}
+
+.toast-icon {
+    font-size: 1rem;
+}
+
+.toast-message {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+/* ── Cached View Banner ── */
+.cached-banner {
+    background: linear-gradient(135deg, #1e3a8a 0%, #312e81 100%);
+    color: white;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.cached-icon {
+    font-size: 1.2rem;
+}
+
+.cached-text {
+    flex: 1;
+    font-size: 0.9rem;
+}
+
+.cached-close {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.cached-close:hover {
+    opacity: 1;
+}
+
+/* ── Offline Mode ── */
+body.offline-mode .edit-btn,
+body.offline-mode .action-btn,
+body.offline-mode [data-mutation],
+body.offline-mode form {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+body.offline-mode .folder-card {
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 .nav-status {
@@ -2158,121 +2352,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
     .connection-status {
         font-size: 0.7rem;
     }
-    
-    /* Mobile Navigation - Show bottom nav, hide top nav links */
-    .nav-links {
-        display: none;
-    }
-    
-    .bottom-nav {
-        display: block;
-    }
-    
-    main {
-        padding: 1rem;
-        padding-bottom: calc(1rem + 80px);
-    }
-    
-    /* Adjust grids for mobile */
-    .folder-grid {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-        gap: 0.75rem;
-    }
-    
-    .video-grid {
-        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-        gap: 0.75rem;
-    }
-    
-    .folder-card {
-        padding: 1rem;
-    }
-    
-    .folder-icon {
-        font-size: 2rem;
-    }
-    
-    /* Search form adjustments */
-    .search-form {
-        flex-direction: column;
-    }
-    
-    .search-form input[type="text"] {
-        min-width: 100%;
-    }
-    
-    /* Show filter toggle button */
-    .filter-toggle-btn {
-        display: flex;
-    }
-    
-    /* Map sidebar becomes bottom sheet on mobile */
-    .map-sidebar {
-        display: none;
-    }
-    
-    .map-sidebar.mobile-sheet {
-        display: flex;
-        position: fixed;
-        bottom: 64px;
-        left: 0;
-        right: 0;
-        width: 100%;
-        max-height: 60vh;
-        border-right: none;
-        border-top: 1px solid var(--border);
-        z-index: 150;
-        transform: translateY(100%);
-        transition: transform 0.3s ease-out;
-    }
-    
-    .map-sidebar.mobile-sheet.active {
-        transform: translateY(0);
-    }
-    
-    /* Multi-select toolbar on mobile */
-    .multi-select-toolbar {
-        bottom: 72px;
-        left: 0.5rem;
-        right: 0.5rem;
-    }
-    
-    /* Larger touch targets on mobile */
-    .video-card, .folder-card {
-        min-height: 44px;
-    }
-    
-    .breadcrumbs a {
-        min-height: 44px;
-        padding: 0.5rem 0.75rem;
-    }
-    
-    /* Video popup adjustments */
-    .video-popup .leaflet-popup-content {
-        width: 260px !important;
-    }
-    
-    .popup-main {
-        flex-direction: column;
-    }
-    
-    .popup-thumb {
-        width: 100%;
-        height: 100px;
-    }
-    
-    .gallery-thumbs {
-        flex-wrap: wrap;
-    }
-    
-    /* Search results on mobile */
-    .result-card {
-        flex-direction: column;
-    }
-    
-    .result-thumb {
-        width: 100%;
-    }
+
 }
 
 /* Extra small devices */
