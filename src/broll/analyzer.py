@@ -6,16 +6,24 @@ Sends extracted keyframes to a vision model and gets back structured description
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import re
 from typing import TYPE_CHECKING
+
+from PIL import Image
 
 from .clients import get_fireworks_client, get_ollama_client
 from .config import AI_PROVIDER, FIREWORKS_VISION_MODEL, OLLAMA_VISION_MODEL
 
 if TYPE_CHECKING:
     pass
+
+# Maximum dimension (width or height) for images sent to the vision API
+MAX_IMAGE_DIMENSION = 1024
+# JPEG quality for resized images
+JPEG_QUALITY = 85
 
 ANALYSIS_PROMPT = (
     "You are analyzing keyframes from a b-roll video clip for a video editor's searchable catalog.\n\n"
@@ -54,6 +62,46 @@ def analyze_frames(keyframes: list[bytes]) -> dict:
         return _analyze_with_ollama(keyframes)
 
 
+def _validate_and_resize_image(image_bytes: bytes) -> bytes:
+    """
+    Validate image size and resize if necessary.
+
+    Args:
+        image_bytes: Raw JPEG image bytes.
+
+    Returns:
+        Resized image bytes if the image exceeded MAX_IMAGE_DIMENSION,
+        otherwise returns original bytes.
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        width, height = img.size
+
+        # Check if resizing is needed
+        if width <= MAX_IMAGE_DIMENSION and height <= MAX_IMAGE_DIMENSION:
+            return image_bytes
+
+        # Calculate new dimensions maintaining aspect ratio
+        if width > height:
+            new_width = MAX_IMAGE_DIMENSION
+            new_height = int(height * (MAX_IMAGE_DIMENSION / width))
+        else:
+            new_height = MAX_IMAGE_DIMENSION
+            new_width = int(width * (MAX_IMAGE_DIMENSION / height))
+
+        # Resize the image
+        img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+        # Convert back to JPEG bytes
+        buffer = io.BytesIO()
+        img_resized.save(buffer, format="JPEG", quality=JPEG_QUALITY)
+        return buffer.getvalue()
+
+    except Exception as e:
+        print(f"  Warning: Could not resize image: {e}")
+        return image_bytes
+
+
 def _analyze_with_fireworks(keyframes: list[bytes]) -> dict:
     """Analyze frames using Fireworks AI Kimi K2.5 Turbo."""
     fireworks_client = get_fireworks_client()
@@ -61,8 +109,11 @@ def _analyze_with_fireworks(keyframes: list[bytes]) -> dict:
         print("  Warning: Fireworks client not available, using empty analysis")
         return _empty_analysis()
 
+    # Validate and resize images if needed before encoding
+    validated_frames = [_validate_and_resize_image(frame) for frame in keyframes]
+
     # Encode images as base64 data URIs
-    images_b64 = [base64.b64encode(frame).decode("utf-8") for frame in keyframes]
+    images_b64 = [base64.b64encode(frame).decode("utf-8") for frame in validated_frames]
     image_data_uris = [f"data:image/jpeg;base64,{b64}" for b64 in images_b64]
 
     # Build message content with images

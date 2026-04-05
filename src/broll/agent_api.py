@@ -11,6 +11,7 @@ import json
 import os
 import sqlite3
 import threading
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +23,32 @@ from .config import get_db_path, get_thumbs_dir, AGENT_API_HOST, AGENT_API_PORT
 _thread_local = threading.local()
 
 
+@lru_cache(maxsize=16)
+def _get_db_connection_pool(db_path: str) -> sqlite3.Connection:
+    """
+    Get a cached sqlite3 connection from the pool.
+    
+    Uses lru_cache to maintain a pool of up to 16 connections,
+    reducing connection overhead for concurrent requests.
+    
+    Args:
+        db_path: Path to the SQLite database file.
+        
+    Returns:
+        A sqlite3 connection with Row factory configured.
+    """
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def _get_thread_db_connection(db_path: str) -> sqlite3.Connection:
     """
-    Get a thread-local database connection.
+    Get a thread-local database connection with pooling support.
+    
+    Uses a combination of:
+    - lru_cache for connection pooling across requests
+    - thread-local storage for thread safety
     
     Each thread gets its own connection stored in thread-local storage.
     Connections are reused across requests within the same thread.
@@ -40,8 +64,8 @@ def _get_thread_db_connection(db_path: str) -> sqlite3.Connection:
         _thread_local.db_connections = {}
     
     if db_path not in _thread_local.db_connections:
-        conn = sqlite3.connect(db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
+        # Get connection from pool (or create new one)
+        conn = _get_db_connection_pool(db_path)
         _thread_local.db_connections[db_path] = conn
     
     return _thread_local.db_connections[db_path]
@@ -68,10 +92,10 @@ def create_agent_app(drive_path: str | Path) -> Flask:
 
     def get_db_conn() -> sqlite3.Connection:
         """
-        Get a database connection with thread-local caching.
+        Get a database connection with thread-local caching and pooling.
         
-        Uses thread-local storage to maintain one connection per thread,
-        reducing connection overhead for concurrent requests.
+        Uses thread-local storage combined with lru_cache pooling
+        to reduce connection overhead for concurrent requests.
         
         Returns:
             A sqlite3 connection with Row factory configured.
