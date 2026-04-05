@@ -1,0 +1,53 @@
+Alembic Database Migrations for broll-organizer
+===============================================
+
+This directory contains Alembic database migrations for the broll-organizer project.
+
+## Usage
+
+### Run migrations on a drive
+
+```bash
+broll migrate /path/to/external/drive
+```
+
+### Check migration status
+
+```bash
+broll migrate /path/to/external/drive --show-status
+```
+
+### Manual Alembic commands
+
+For advanced usage, you can run Alembic commands directly:
+
+```bash
+# Upgrade to latest
+uv run alembic -x drive_path=/path/to/drive upgrade head
+
+# Show current revision
+uv run alembic -x drive_path=/path/to/drive current
+
+# Show history
+uv run alembic history --verbose
+```
+
+## How It Works
+
+- Migrations are stored in `alembic/versions/`
+- The database URL is dynamically constructed from the drive path via `-x drive_path=...`
+- sqlite-vec extension is automatically loaded for vector table operations
+- All schema changes are captured in versioned migration files
+
+## Auto-Migration on Init
+
+When you run `broll init /path/to/drive`, migrations are automatically applied
+to ensure the database schema is up-to-date.
+
+## Schema
+
+The current schema includes:
+- `videos` - Main video catalog table
+- `videos_fts` - FTS5 virtual table for full-text search
+- `videos_vec` - sqlite-vec virtual table for semantic search
+- `location_cache` - Geocoding cache for location names

@@ -5,6 +5,8 @@ CLI entry point for the b-roll organizer.
 from __future__ import annotations
 
 import click
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +19,63 @@ from .doctor import (
     fix_missing_files,
     fix_orphaned_thumbnails,
 )
+
+
+def _run_migrations(drive_path: Path) -> bool:
+    """Run Alembic migrations for the specified drive."""
+    db_path = get_db_path(drive_path)
+    
+    # Find the project root (where alembic.ini lives)
+    project_root = Path(__file__).parent.parent.parent
+    alembic_ini = project_root / "alembic.ini"
+    
+    if not alembic_ini.exists():
+        click.echo(f"Alembic configuration not found at {alembic_ini}", err=True)
+        return False
+    
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "alembic",
+                "-c", str(alembic_ini),
+                "-x", f"drive_path={drive_path}",
+                "upgrade", "head"
+            ],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        click.echo(f"Migration failed: {e.stderr}", err=True)
+        return False
+
+
+def _get_migration_status(drive_path: Path) -> str:
+    """Get current migration status for the drive."""
+    project_root = Path(__file__).parent.parent.parent
+    alembic_ini = project_root / "alembic.ini"
+    
+    if not alembic_ini.exists():
+        return "unknown"
+    
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "alembic",
+                "-c", str(alembic_ini),
+                "-x", f"drive_path={drive_path}",
+                "current"
+            ],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return "error"
 
 
 @click.group()
@@ -37,8 +96,21 @@ def init(drive_path: str):
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     click.echo(f'Thumbnails directory: {thumbs_dir}')
 
-    with Database(db_path) as db:
-        db.initialize()
+    # Run database migrations (creates schema if new, updates if existing)
+    click.echo('\nRunning database migrations...')
+    if _run_migrations(drive):
+        click.echo('Database migrations complete')
+    else:
+        click.echo('Warning: Falling back to legacy initialization...')
+        with Database(db_path) as db:
+            db.initialize()
+            # Also run legacy migrations for any schema updates
+            db.migrate()
+    
+    # Show migration status
+    status = _get_migration_status(drive)
+    if status and status not in ('unknown', 'error'):
+        click.echo(f'   Migration: {status}')
 
     click.echo(f'\nB-Roll Organizer ready!')
     click.echo(f'   Database: {db_path}')
@@ -784,3 +856,40 @@ def thumbnail(video_id: int, drive: str, base64_output: bool, output_path: str |
 
         # Default: just print the path
         click.echo(thumb_path)
+
+
+@cli.command()
+@click.argument('drive_path', type=click.Path(exists=True, file_okay=False))
+@click.option('--show-status', is_flag=True, help='Show current migration status')
+def migrate(drive_path: str, show_status: bool):
+    """Run database migrations on the external drive.
+    
+    This upgrades the database schema to the latest version.
+    Use --show-status to see current migration state without running migrations.
+    """
+    drive = Path(drive_path)
+    db_path = get_db_path(drive)
+    
+    # Ensure .broll directory exists
+    app_dir = db_path.parent
+    app_dir.mkdir(parents=True, exist_ok=True)
+    
+    if show_status:
+        click.echo(f"Migration status for {drive_path}:")
+        status = _get_migration_status(drive)
+        if status:
+            click.echo(f"  {status}")
+        else:
+            click.echo("  No migrations applied yet")
+        return
+    
+    click.echo(f"Running migrations for {drive_path}...")
+    
+    if _run_migrations(drive):
+        click.echo(f"Migrations complete")
+        status = _get_migration_status(drive)
+        if status:
+            click.echo(f"   Current: {status}")
+    else:
+        click.echo("Migration failed", err=True)
+        raise SystemExit(1)
