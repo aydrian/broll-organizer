@@ -5,6 +5,19 @@ document.addEventListener('DOMContentLoaded', () => {
         loading: false,
         hasMore: true,
         limit: 24,
+        // Multi-select state
+        selected: new Set(),
+        lastSelected: null,
+        isMultiSelectMode: false,
+        longPressDuration: 500, // ms for mobile long-press
+        allLoadedVideos: [], // Track all loaded video IDs for select-all
+        // Keyboard navigation
+        focusedCardIndex: -1,
+        videoCards: [],
+        // Hover preview state
+        hoverPreviewTimeout: null,
+        currentPreviewVideo: null,
+        // Mobile state
         multiSelect: false,
         selectedItems: new Set(),
         touchStartY: 0,
@@ -17,11 +30,27 @@ document.addEventListener('DOMContentLoaded', () => {
         videoGrid: document.getElementById('video-grid'),
         loader: document.getElementById('loader'),
         sentinel: document.getElementById('sentinel'),
-        main: document.querySelector('main')
+        main: document.querySelector('main'),
+        batchToolbar: document.getElementById('batch-toolbar'),
+        selectionCount: document.getElementById('selection-count'),
+        selectAllBtn: document.getElementById('select-all-btn'),
+        deselectAllBtn: document.getElementById('deselect-all-btn'),
+        playlistDropdown: document.getElementById('playlist-dropdown'),
+        playlistList: document.getElementById('playlist-list'),
+        newPlaylistName: document.getElementById('new-playlist-name'),
+        // Modals
+        batchLocationModal: document.getElementById('batch-location-modal'),
+        batchLocationSearch: document.getElementById('batch-location-search'),
+        batchLocationResults: document.getElementById('batch-location-results'),
+        batchLocationConfirm: document.getElementById('batch-location-confirm'),
+        exportModal: document.getElementById('export-modal')
     };
 
     // Initial load
     loadContent(true);
+    loadPlaylists();
+    initKeyboardShortcuts();
+    createKeyboardHelpModal();
 
     // Infinite scroll
     const observer = new IntersectionObserver((entries) => {
@@ -63,6 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Keyboard navigation
     setupKeyboardNavigation();
 
+
     async function loadContent(reset = false, restoring = false) {
         if (state.loading) return;
         state.loading = true;
@@ -86,9 +116,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderBreadcrumbs(data.path);
                 renderFolders(data.folders);
                 elements.videoGrid.innerHTML = '';
+                state.allLoadedVideos = [];
             }
 
             renderVideos(data.videos);
+            data.videos.forEach(v => state.allLoadedVideos.push(v.id));
 
             if (restoring) {
                 // Restore scroll position
@@ -105,9 +137,9 @@ document.addEventListener('DOMContentLoaded', () => {
             state.hasMore = data.has_more;
             if (!state.hasMore) {
                 elements.loader.style.display = 'none';
-                observer.unobserve(elements.sentinel); // Stop observing if no more
+                observer.unobserve(elements.sentinel);
             } else {
-                observer.observe(elements.sentinel); // Re-observe if needed
+                observer.observe(elements.sentinel);
             }
 
         } catch (error) {
@@ -123,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.path = path;
         state.page = 1;
         state.hasMore = true;
+        clearSelection();
 
         // Update URL
         const url = new URL(window.location);
@@ -498,6 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
             toast.style.transition = 'opacity 0.3s';
             setTimeout(() => toast.remove(), 300);
         }, 2000);
+
     }
 
     // Helpers
@@ -528,5 +562,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+
     }
 });

@@ -11,6 +11,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from flask import (
     Flask,
@@ -67,7 +68,6 @@ def create_app(drive_path: str) -> Flask:
     app.config["DRIVE_PATH"] = str(drive)
     app.config["DB_PATH"] = str(get_db_path(drive))
     app.config["THUMBS_DIR"] = str(get_thumbs_dir(drive))
-    app.config["SECRET_KEY"] = "broll-local-dev"
 
     # ── Jinja2 filters ──
 
@@ -467,6 +467,7 @@ def create_app(drive_path: str) -> Flask:
                 "timestamp": time.time()
             }), 503
 
+
     # ═════════════════════════════════════════════════════════════════
     # Map Routes & API
     # ═════════════════════════════════════════════════════════════════
@@ -807,5 +808,6 @@ def create_app(drive_path: str) -> Flask:
                     os.remove(output_path)
             except:
                 pass
+
 
     return app

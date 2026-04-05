@@ -1,0 +1,96 @@
+<!-- src/broll/web/templates/timeline.html -->
+{% extends "base.html" %}
+{% block title %}Timeline - B-Roll Catalog{% endblock %}
+
+{% block content %}
+<div class="timeline-container">
+    <!-- Timeline Header -->
+    <div class="timeline-header">
+        <h1>📅 Timeline</h1>
+        <p class="timeline-subtitle">Browse your B-roll by date</p>
+    </div>
+
+    <!-- Navigation Breadcrumbs -->
+    <nav class="timeline-breadcrumbs" id="timeline-breadcrumbs">
+        <a href="/timeline" class="breadcrumb-root">Years</a>
+    </nav>
+
+    <!-- View Container -->
+    <div id="timeline-view" class="timeline-view">
+        <!-- Content loaded dynamically -->
+        <div class="timeline-loading">Loading...</div>
+    </div>
+</div>
+
+<!-- Templates for dynamic content -->
+<template id="years-template">
+    <div class="years-grid">
+        <!-- Year cards inserted here -->
+    </div>
+</template>
+
+<template id="year-template">
+    <div class="year-view">
+        <div class="year-header">
+            <h2 class="year-title"></h2>
+            <div class="year-stats">
+                <span class="stat"><span class="stat-value" id="year-total-videos">0</span> clips</span>
+                <span class="stat"><span class="stat-value" id="year-active-days">0</span> active days</span>
+            </div>
+        </div>
+        <div class="activity-heatmap" id="activity-heatmap">
+            <!-- Heatmap cells inserted here -->
+        </div>
+        <div class="months-grid" id="months-grid">
+            <!-- Month cards inserted here -->
+        </div>
+    </div>
+</template>
+
+<template id="month-template">
+    <div class="month-view">
+        <div class="month-header">
+            <h2 class="month-title"></h2>
+            <div class="month-nav">
+                <button class="btn-icon" id="prev-month" title="Previous month">←</button>
+                <button class="btn-icon" id="next-month" title="Next month">→</button>
+            </div>
+        </div>
+        <div class="month-calendar">
+            <div class="calendar-weekdays">
+                <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+            </div>
+            <div class="calendar-days" id="calendar-days">
+                <!-- Day cells inserted here -->
+            </div>
+        </div>
+    </div>
+</template>
+
+<template id="day-template">
+    <div class="day-view">
+        <div class="day-header">
+            <h2 class="day-title"></h2>
+            <div class="day-nav">
+                <button class="btn-icon" id="prev-day" title="Previous day">←</button>
+                <button class="btn-icon" id="next-day" title="Next day">→</button>
+            </div>
+        </div>
+        <div class="day-content">
+            <div class="day-videos" id="day-videos">
+                <!-- Video cards inserted here -->
+            </div>
+            <div class="on-this-day" id="on-this-day">
+                <h3>🎉 On This Day</h3>
+                <div class="on-this-day-content" id="on-this-day-content">
+                    <!-- Past year videos inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/timeline.js"></script>
+{% endblock %}
