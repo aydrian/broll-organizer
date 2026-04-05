@@ -4,11 +4,11 @@
 
 {% block content %}
 <div class="browse-header">
-    <form action="/search" method="get" class="search-form">
-        <input type="text" name="q" placeholder="Search your clips..." autocomplete="off">
-        <button type="submit">Search</button>
+    <form action="/search" method="get" class="search-form" role="search" aria-label="Search videos">
+        <input type="text" name="q" placeholder="Search your clips..." autocomplete="off" aria-label="Search query">
+        <button type="submit" aria-label="Search">Search</button>
     </form>
-    <div class="stats-bar">
+    <div class="stats-bar" role="status" aria-label="Library statistics">
         {{ stats.total_videos }} clips |
         {{ stats.analyzed_count }} analyzed |
         {{ stats.geotagged_count }} geotagged |
@@ -16,14 +16,34 @@
     </div>
 </div>
 
-    <div id="breadcrumbs" class="breadcrumbs"></div>
+    <!-- Filter toggle button for mobile -->
+    <button type="button" class="filter-toggle-btn" id="filter-toggle" aria-label="Show filters" aria-expanded="false">
+        <span aria-hidden="true">⚙️</span> Filters
+    </button>
 
-    <div id="folder-grid" class="folder-grid"></div>
 
-    <div id="video-grid" class="video-grid"></div>
+    <nav id="breadcrumbs" class="breadcrumbs" aria-label="Breadcrumb navigation"></nav>
+
+    <div id="folder-grid" class="folder-grid" role="list" aria-label="Folders"></div>
+
+    <div id="video-grid" class="video-grid" role="feed" aria-label="Video clips"></div>
     
-    <div id="loader" class="loader">Loading...</div>
-    <div id="sentinel" class="sentinel"></div>
+    <div id="loader" class="loader" role="status" aria-live="polite">Loading...</div>
+    <div id="sentinel" class="sentinel" aria-hidden="true"></div>
+    
+    <!-- Multi-select toolbar for mobile -->
+    <div class="multi-select-toolbar" id="multi-select-toolbar" role="toolbar" aria-label="Selection actions">
+        <span class="multi-select-count" id="selected-count">0 selected</span>
+        <div class="multi-select-actions">
+            <button type="button" class="multi-select-btn secondary" id="cancel-selection" aria-label="Cancel selection">
+                Cancel
+            </button>
+            <button type="button" class="multi-select-btn" id="add-to-playlist" aria-label="Add selected to playlist">
+                <span aria-hidden="true">+</span> Playlist
+            </button>
+
+        </div>
+    </div>
 {% endblock %}
 
 {% block scripts %}

@@ -9,18 +9,46 @@
     {% block head %}{% endblock %}
 </head>
 <body>
-    <nav class="top-nav">
+    <a href="#content" class="skip-link">Skip to main content</a>
+    <nav class="top-nav" aria-label="Main navigation">
         <div class="nav-brand">B-Roll Catalog</div>
         <div class="nav-links">
-            <a href="/" class="{% if request.endpoint == 'browse' %}active{% endif %}">Browse</a>
-            <a href="/search" class="{% if request.endpoint == 'search_page' %}active{% endif %}">Search</a>
-            <a href="/map" class="{% if request.endpoint == 'map_page' %}active{% endif %}">Map</a>
+            <a href="/" class="{% if request.endpoint == 'browse' %}active{% endif %}" aria-current="{% if request.endpoint == 'browse' %}page{% endif %}">Browse</a>
+            <a href="/search" class="{% if request.endpoint == 'search_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'search_page' %}page{% endif %}">Search</a>
+            <a href="/map" class="{% if request.endpoint == 'map_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'map_page' %}page{% endif %}">Map</a>
+        </div>
+        <div class="nav-status">
+            <span id="connection-status" class="connection-status online" title="Drive connected">[● Online]</span>
+
         </div>
         <div class="nav-status">
             <span id="connection-status" class="connection-status online" title="Drive connected">[● Online]</span>
         </div>
     </nav>
-    <main>
+    
+    <!-- Mobile Bottom Navigation -->
+    <nav class="bottom-nav" aria-label="Mobile navigation">
+        <div class="bottom-nav-items">
+            <a href="/" class="bottom-nav-item {% if request.endpoint == 'browse' %}active{% endif %}" aria-label="Browse videos">
+                <span class="bottom-nav-icon" aria-hidden="true">📁</span>
+                <span class="bottom-nav-label">Browse</span>
+            </a>
+            <a href="/search" class="bottom-nav-item {% if request.endpoint == 'search_page' %}active{% endif %}" aria-label="Search videos">
+                <span class="bottom-nav-icon" aria-hidden="true">🔍</span>
+                <span class="bottom-nav-label">Search</span>
+            </a>
+            <a href="/playlists" class="bottom-nav-item {% if request.endpoint == 'playlists' %}active{% endif %}" aria-label="Playlists">
+                <span class="bottom-nav-icon" aria-hidden="true">📋</span>
+                <span class="bottom-nav-label">Lists</span>
+            </a>
+            <a href="/map" class="bottom-nav-item {% if request.endpoint == 'map_page' %}active{% endif %}" aria-label="Map view">
+                <span class="bottom-nav-icon" aria-hidden="true">🗺️</span>
+                <span class="bottom-nav-label">Map</span>
+            </a>
+        </div>
+    </nav>
+    
+    <main id="content" role="main">
         {% block content %}{% endblock %}
     </main>
     {% block scripts %}{% endblock %}

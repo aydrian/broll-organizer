@@ -11,6 +11,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from flask import (
     Flask,
@@ -67,7 +68,6 @@ def create_app(drive_path: str) -> Flask:
     app.config["DRIVE_PATH"] = str(drive)
     app.config["DB_PATH"] = str(get_db_path(drive))
     app.config["THUMBS_DIR"] = str(get_thumbs_dir(drive))
-    app.config["SECRET_KEY"] = "broll-local-dev"
 
     # ── Jinja2 filters ──
 
@@ -467,6 +467,7 @@ def create_app(drive_path: str) -> Flask:
                 "timestamp": time.time()
             }), 503
 
+
     # ═════════════════════════════════════════════════════════════════
     # Map Routes & API
     # ═════════════════════════════════════════════════════════════════
@@ -683,5 +684,130 @@ def create_app(drive_path: str) -> Flask:
     @app.route("/api/stats")
     def api_stats():
         return jsonify(get_stats())
+
+    # ═════════════════════════════════════════════════════════════════
+    # Clip Export API
+    # ═════════════════════════════════════════════════════════════════
+
+    @app.route("/api/clip/export", methods=["POST"])
+    def api_clip_export():
+        """
+        Export a trimmed video clip using FFmpeg.
+        
+        Expects JSON with:
+        - video_id: int
+        - start_time: float (seconds)
+        - end_time: float (seconds)
+        - filename: str (optional, for download)
+        
+        Returns:
+        - download_url: str
+        - clip_duration: float
+        """
+        import subprocess
+        import tempfile
+        import os
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        video_id = data.get("video_id")
+        start_time = data.get("start_time")
+        end_time = data.get("end_time")
+        filename = data.get("filename", "clip.mp4")
+        
+        # Validate inputs
+        if not video_id:
+            return jsonify({"error": "video_id is required"}), 400
+        
+        try:
+            start_time = float(start_time) if start_time is not None else 0
+            end_time = float(end_time) if end_time is not None else None
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid start_time or end_time"}), 400
+        
+        # Get video info
+        video = get_video_by_id(video_id)
+        if not video:
+            return jsonify({"error": "Video not found"}), 404
+        
+        # Validate file path
+        file_path = video["file_path"]
+        if file_path.startswith("..") or file_path.startswith("/"):
+            return jsonify({"error": "Invalid file path"}), 400
+        
+        drive = Path(current_app.config["DRIVE_PATH"])
+        video_path = (drive / file_path).resolve()
+        
+        # Security check
+        if not str(video_path).startswith(str(drive)):
+            return jsonify({"error": "Invalid file path"}), 400
+        
+        if not video_path.exists():
+            return jsonify({"error": "Video file not found"}), 404
+        
+        # Calculate duration
+        duration = video.get("duration_seconds", 0)
+        if end_time is None:
+            end_time = duration
+        
+        if start_time < 0 or end_time > duration or start_time >= end_time:
+            return jsonify({"error": "Invalid trim range"}), 400
+        
+        clip_duration = end_time - start_time
+        
+        # Create temporary file for export
+        temp_dir = tempfile.gettempdir()
+        safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
+        output_path = Path(temp_dir) / safe_filename
+        
+        try:
+            # Build FFmpeg command for lossless trimming (copy codecs)
+            cmd = [
+                "ffmpeg",
+                "-y",  # Overwrite output file if exists
+                "-ss", str(start_time),  # Start time
+                "-i", str(video_path),   # Input file
+                "-t", str(clip_duration), # Duration
+                "-c", "copy",            # Copy codecs (fast, lossless)
+                "-avoid_negative_ts", "1", # Ensure timestamps are positive
+                "-movflags", "+faststart", # Web-optimized
+                str(output_path)
+            ]
+            
+            # Run FFmpeg
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+            
+            if result.returncode != 0:
+                current_app.logger.error(f"FFmpeg error: {result.stderr}")
+                return jsonify({"error": "Failed to export clip", "details": result.stderr}), 500
+            
+            # Return the file as a downloadable response
+            return send_file(
+                output_path,
+                mimetype="video/mp4",
+                as_attachment=True,
+                download_name=safe_filename
+            )
+            
+        except subprocess.TimeoutExpired:
+            return jsonify({"error": "Export timed out"}), 500
+        except Exception as e:
+            current_app.logger.error(f"Clip export error: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            # Clean up temp file after sending (or if it exists)
+            try:
+                if output_path.exists():
+                    os.remove(output_path)
+            except:
+                pass
+
 
     return app

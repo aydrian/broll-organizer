@@ -341,6 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
         hasMore: true,
         limit: 24,
         offlineMode: false
+
     };
 
     const elements = {
@@ -348,7 +349,21 @@ document.addEventListener('DOMContentLoaded', () => {
         folderGrid: document.getElementById('folder-grid'),
         videoGrid: document.getElementById('video-grid'),
         loader: document.getElementById('loader'),
-        sentinel: document.getElementById('sentinel')
+        sentinel: document.getElementById('sentinel'),
+        main: document.querySelector('main'),
+        batchToolbar: document.getElementById('batch-toolbar'),
+        selectionCount: document.getElementById('selection-count'),
+        selectAllBtn: document.getElementById('select-all-btn'),
+        deselectAllBtn: document.getElementById('deselect-all-btn'),
+        playlistDropdown: document.getElementById('playlist-dropdown'),
+        playlistList: document.getElementById('playlist-list'),
+        newPlaylistName: document.getElementById('new-playlist-name'),
+        // Modals
+        batchLocationModal: document.getElementById('batch-location-modal'),
+        batchLocationSearch: document.getElementById('batch-location-search'),
+        batchLocationResults: document.getElementById('batch-location-results'),
+        batchLocationConfirm: document.getElementById('batch-location-confirm'),
+        exportModal: document.getElementById('export-modal')
     };
 
     // Listen for connection events
@@ -413,6 +428,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial load
     loadContent(true);
+    loadPlaylists();
+    initKeyboardShortcuts();
+    createKeyboardHelpModal();
 
     // Infinite scroll
     const observer = new IntersectionObserver((entries) => {
@@ -444,6 +462,16 @@ document.addEventListener('DOMContentLoaded', () => {
         state.hasMore = true;
         loadContent(true, true); // true for reset, true for restore
     });
+
+    // Pull to refresh for mobile
+    setupPullToRefresh();
+    
+    // Long press for multi-select on mobile
+    setupLongPress();
+    
+    // Keyboard navigation
+    setupKeyboardNavigation();
+
 
     async function loadContent(reset = false, restoring = false) {
         if (state.loading || state.offlineMode) return;
@@ -477,9 +505,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderFolders(data.folders);
                 elements.videoGrid.innerHTML = '';
                 state.folders = data.folders;
+
             }
 
             renderVideos(data.videos);
+            data.videos.forEach(v => state.allLoadedVideos.push(v.id));
 
             if (restoring) {
                 // Restore scroll position
@@ -496,9 +526,9 @@ document.addEventListener('DOMContentLoaded', () => {
             state.hasMore = data.has_more;
             if (!state.hasMore) {
                 elements.loader.style.display = 'none';
-                observer.unobserve(elements.sentinel); // Stop observing if no more
+                observer.unobserve(elements.sentinel);
             } else {
-                observer.observe(elements.sentinel); // Re-observe if needed
+                observer.observe(elements.sentinel);
             }
 
         } catch (error) {
@@ -506,6 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state.offlineMode) {
                 elements.videoGrid.innerHTML += '<div class="error">Error loading videos. Drive may be disconnected.</div>';
             }
+
         } finally {
             state.loading = false;
             if (!state.hasMore) elements.loader.style.display = 'none';
@@ -522,6 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.path = path;
         state.page = 1;
         state.hasMore = true;
+        clearSelection();
 
         // Update URL
         const url = new URL(window.location);
@@ -537,22 +569,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderBreadcrumbs(currentPath) {
         const parts = currentPath ? currentPath.split('/') : [];
-        let html = '<span class="crumb"><a href="#" data-path="">Home</a></span>';
+        let html = '<span class="crumb"><a href="#" data-path="" aria-label="Go to Home">Home</a></span>';
 
         let accumPath = '';
         parts.forEach((part, index) => {
             if (!part) return;
             accumPath += (index > 0 ? '/' : '') + part;
-            html += ` <span class="separator">/</span> <span class="crumb"><a href="#" data-path="${accumPath}">${part}</a></span>`;
+            html += ` <span class="separator" aria-hidden="true">/</span> <span class="crumb"><a href="#" data-path="${accumPath}" aria-label="Go to ${part}">${part}</a></span>`;
         });
 
         elements.breadcrumbs.innerHTML = html;
+        elements.breadcrumbs.setAttribute('aria-label', 'Breadcrumb navigation');
 
         // Add click handlers
         elements.breadcrumbs.querySelectorAll('a').forEach(a => {
             a.addEventListener('click', (e) => {
                 e.preventDefault();
                 navigateTo(e.target.dataset.path);
+            });
+            
+            // Keyboard navigation support
+            a.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    navigateTo(e.target.dataset.path);
+                }
             });
         });
     }
@@ -565,17 +606,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         elements.folderGrid.style.display = 'grid';
         elements.folderGrid.innerHTML = folders.map(folder => `
-            <div class="folder-card" data-path="${folder.path}">
-                <div class="folder-icon">📁</div>
+            <div class="folder-card" 
+                 data-path="${folder.path}" 
+                 role="button"
+                 tabindex="0"
+                 aria-label="Open folder: ${folder.name}"
+                 data-type="folder">
+                <div class="folder-icon" aria-hidden="true">📁</div>
                 <div class="folder-name">${folder.name}</div>
             </div>
         `).join('');
 
         // Add click handlers
         elements.folderGrid.querySelectorAll('.folder-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const path = card.dataset.path;
-                navigateTo(path);
+            card.addEventListener('click', () => handleCardClick(card));
+            
+            // Keyboard navigation
+            card.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleCardClick(card);
+                }
             });
         });
     }
@@ -583,10 +634,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderVideos(videos) {
         if (!videos || videos.length === 0) {
             if (state.page === 1 && (!state.folders || state.folders.length === 0)) {
-                // Only show "No videos" if there are also no folders, or maybe just if no videos
-                // For now, let's just append nothing.
                 if (elements.videoGrid.children.length === 0) {
-                    elements.videoGrid.innerHTML = '<div class="empty-state">No videos in this folder.</div>';
+                    elements.videoGrid.innerHTML = '<div class="empty-state" role="status">No videos in this folder.</div>';
                 }
             }
             return;
@@ -596,24 +645,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const emptyState = elements.videoGrid.querySelector('.empty-state');
         if (emptyState) emptyState.remove();
 
-        const html = videos.map(video => `
-            <a href="/video/${video.id}" class="video-card">
+        const html = videos.map(video => {
+            const desc = video.scene_description && !video.scene_description.startsWith("ERROR") 
+                ? video.scene_description.substring(0, 100) 
+                : '';
+            const ariaLabel = `${video.file_name}${desc ? ': ' + desc : ''}${video.duration_seconds ? ', Duration: ' + formatDuration(video.duration_seconds) : ''}${video.gps_location_name ? ', Location: ' + video.gps_location_name : ''}`;
+            
+            return `
+            <a href="/video/${video.id}" 
+               class="video-card" 
+               role="article"
+               tabindex="0"
+               aria-label="${escapeHtml(ariaLabel)}"
+               data-id="${video.id}"
+               data-type="video">
                 <div class="card-thumb">
                     ${video.thumbnail_path
-                ? `<img src="/thumbnail/${video.file_hash}" alt="${video.file_name}" loading="lazy">`
-                : '<div class="no-thumb">No Preview</div>'}
+                ? `<img src="/thumbnail/${video.file_hash}" alt="${escapeHtml(desc || 'Video thumbnail')}" loading="lazy">`
+                : '<div class="no-thumb" role="img" aria-label="No preview available">No Preview</div>'}
                     ${video.duration_seconds
-                ? `<span class="card-duration">${formatDuration(video.duration_seconds)}</span>`
+                ? `<span class="card-duration" aria-label="Duration: ${formatDuration(video.duration_seconds)}">${formatDuration(video.duration_seconds)}</span>`
                 : ''}
                     ${video.source_device
-                ? `<span class="card-device">${video.source_device}</span>`
+                ? `<span class="card-device" aria-label="Recorded on: ${video.source_device}">${video.source_device}</span>`
                 : ''}
                 </div>
                 <div class="card-info">
                     <div class="card-filename">${video.file_name}</div>
-                    ${video.scene_description && !video.scene_description.startsWith("ERROR")
-                ? `<div class="card-desc">${video.scene_description.substring(0, 100)}</div>`
-                : ''}
+                    ${desc ? `<div class="card-desc">${desc}</div>` : ''}
                     ${renderTags(video.tags)}
                     <div class="card-meta">
                         ${video.resolution || ''}
@@ -621,9 +680,256 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
             </a>
-        `).join('');
+        `}).join('');
 
         elements.videoGrid.insertAdjacentHTML('beforeend', html);
+        
+        // Add keyboard navigation to new video cards
+        elements.videoGrid.querySelectorAll('.video-card:not([data-keyboard-ready])').forEach(card => {
+            card.dataset.keyboardReady = 'true';
+            card.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (state.multiSelect) {
+                        toggleSelection(card);
+                    } else {
+                        window.location.href = card.href;
+                    }
+                }
+            });
+            
+            // Long press handler for multi-select
+            if ('ontouchstart' in window) {
+                setupCardLongPress(card);
+            }
+        });
+    }
+
+    function handleCardClick(card) {
+        if (state.multiSelect) {
+            toggleSelection(card);
+        } else {
+            const path = card.dataset.path;
+            navigateTo(path);
+        }
+    }
+
+    function toggleSelection(card) {
+        const id = card.dataset.path || card.dataset.id;
+        if (state.selectedItems.has(id)) {
+            state.selectedItems.delete(id);
+            card.classList.remove('selected');
+            card.setAttribute('aria-selected', 'false');
+        } else {
+            state.selectedItems.add(id);
+            card.classList.add('selected');
+            card.setAttribute('aria-selected', 'true');
+        }
+        updateMultiSelectToolbar();
+    }
+
+    function updateMultiSelectToolbar() {
+        const toolbar = document.querySelector('.multi-select-toolbar');
+        if (!toolbar) return;
+        
+        const count = state.selectedItems.size;
+        if (count === 0 && state.multiSelect) {
+            toolbar.classList.remove('active');
+            state.multiSelect = false;
+        } else if (count > 0) {
+            toolbar.classList.add('active');
+            toolbar.querySelector('.multi-select-count').textContent = `${count} selected`;
+        }
+    }
+
+    function setupPullToRefresh() {
+        if (!('ontouchstart' in window)) return;
+        
+        let startY = 0;
+        let currentY = 0;
+        let isPulling = false;
+        
+        // Add pull indicator
+        const ptr = document.createElement('div');
+        ptr.className = 'ptr-indicator';
+        ptr.innerHTML = '<div class="ptr-spinner"></div>';
+        ptr.setAttribute('aria-hidden', 'true');
+        elements.main.insertBefore(ptr, elements.main.firstChild);
+        
+        document.addEventListener('touchstart', (e) => {
+            if (window.scrollY === 0 && state.pullToRefreshEnabled) {
+                startY = e.touches[0].clientY;
+                isPulling = true;
+            }
+        }, { passive: true });
+        
+        document.addEventListener('touchmove', (e) => {
+            if (!isPulling) return;
+            
+            currentY = e.touches[0].clientY;
+            const diff = currentY - startY;
+            
+            if (diff > 0 && window.scrollY === 0) {
+                if (diff > 50) {
+                    ptr.classList.add('visible');
+                }
+                if (diff > 150) {
+                    ptr.classList.add('spinning');
+                }
+            }
+        }, { passive: true });
+        
+        document.addEventListener('touchend', () => {
+            if (!isPulling) return;
+            
+            const diff = currentY - startY;
+            if (diff > 150 && window.scrollY === 0) {
+                // Trigger refresh
+                ptr.classList.add('spinning');
+                loadContent(true).then(() => {
+                    ptr.classList.remove('visible', 'spinning');
+                });
+            } else {
+                ptr.classList.remove('visible', 'spinning');
+            }
+            
+            isPulling = false;
+            startY = 0;
+            currentY = 0;
+        });
+    }
+
+    function setupLongPress() {
+        if (!('ontouchstart' in window)) return;
+        
+        let longPressTimer;
+        const longPressDuration = 500;
+        
+        elements.folderGrid.addEventListener('touchstart', (e) => {
+            const card = e.target.closest('.folder-card');
+            if (card) {
+                longPressTimer = setTimeout(() => {
+                    if (!state.multiSelect) {
+                        state.multiSelect = true;
+                        toggleSelection(card);
+                    }
+                }, longPressDuration);
+            }
+        }, { passive: true });
+        
+        elements.folderGrid.addEventListener('touchend', () => {
+            clearTimeout(longPressTimer);
+        });
+        
+        elements.folderGrid.addEventListener('touchmove', () => {
+            clearTimeout(longPressTimer);
+        });
+    }
+
+    function setupCardLongPress(card) {
+        let longPressTimer;
+        const longPressDuration = 500;
+        
+        card.addEventListener('touchstart', (e) => {
+            longPressTimer = setTimeout(() => {
+                if (!state.multiSelect) {
+                    state.multiSelect = true;
+                    toggleSelection(card);
+                    // Vibrate if supported
+                    if (navigator.vibrate) {
+                        navigator.vibrate(50);
+                    }
+                }
+            }, longPressDuration);
+        }, { passive: true });
+        
+        card.addEventListener('touchend', () => {
+            clearTimeout(longPressTimer);
+        });
+        
+        card.addEventListener('touchmove', () => {
+            clearTimeout(longPressTimer);
+        });
+    }
+
+    function setupKeyboardNavigation() {
+        // Global keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Escape to exit multi-select mode
+            if (e.key === 'Escape' && state.multiSelect) {
+                exitMultiSelectMode();
+            }
+        });
+        
+        // Multi-select toolbar button handlers
+        const cancelBtn = document.getElementById('cancel-selection');
+        const addToPlaylistBtn = document.getElementById('add-to-playlist');
+        
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', exitMultiSelectMode);
+        }
+        
+        if (addToPlaylistBtn) {
+            addToPlaylistBtn.addEventListener('click', addSelectedToPlaylist);
+        }
+    }
+    
+    function exitMultiSelectMode() {
+        state.multiSelect = false;
+        state.selectedItems.clear();
+        document.querySelectorAll('.folder-card.selected, .video-card.selected').forEach(card => {
+            card.classList.remove('selected');
+            card.setAttribute('aria-selected', 'false');
+        });
+        updateMultiSelectToolbar();
+    }
+    
+    function addSelectedToPlaylist() {
+        const selectedIds = Array.from(state.selectedItems);
+        if (selectedIds.length === 0) return;
+        
+        // Dispatch custom event for playlist handling
+        const event = new CustomEvent('addToPlaylist', {
+            detail: { ids: selectedIds }
+        });
+        document.dispatchEvent(event);
+        
+        // Show feedback to user
+        showNotification(`${selectedIds.length} items ready to add to playlist`);
+        exitMultiSelectMode();
+    }
+    
+    function showNotification(message) {
+        const existing = document.querySelector('.notification-toast');
+        if (existing) existing.remove();
+        
+        const toast = document.createElement('div');
+        toast.className = 'notification-toast';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        toast.textContent = message;
+        
+        Object.assign(toast.style, {
+            position: 'fixed',
+            bottom: '160px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'var(--accent)',
+            color: 'white',
+            padding: '0.75rem 1.5rem',
+            borderRadius: 'var(--radius)',
+            zIndex: '1000',
+            fontWeight: '500'
+        });
+        
+        document.body.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transition = 'opacity 0.3s';
+            setTimeout(() => toast.remove(), 300);
+        }, 2000);
+
     }
 
     // Helpers
@@ -645,8 +951,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!Array.isArray(parsed)) return '';
 
-        return `<div class="card-tags">
-            ${parsed.slice(0, 4).map(tag => `<span class="tag">${tag}</span>`).join('')}
+        return `<div class="card-tags" role="list" aria-label="Tags">
+            ${parsed.slice(0, 4).map(tag => `<span class="tag" role="listitem">${escapeHtml(tag)}</span>`).join('')}
         </div>`;
+    }
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+
     }
 });
