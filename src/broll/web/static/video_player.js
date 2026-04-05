@@ -53,13 +53,13 @@ class VideoPlayer {
         const tags = metadata.tags ? this.parseTags(metadata.tags) : [];
 
         this.container.innerHTML = `
-            <div class="video-player-container">
+            <div class="video-player-container" role="region" aria-label="Video player">
                 <div class="video-wrapper">
-                    <video class="video-element" preload="metadata" playsinline crossorigin="anonymous">
+                    <video class="video-element" preload="metadata" playsinline crossorigin="anonymous" aria-label="Video content">
                         <source src="${this.options.videoSrc}" type="video/mp4">
                         Your browser does not support video playback.
                     </video>
-                    <div class="metadata-overlay" id="metadataOverlay">
+                    <div class="metadata-overlay" id="metadataOverlay" aria-hidden="true">
                         <div class="metadata-content">
                             <div class="metadata-filename">${metadata.file_name || 'Unknown'}</div>
                             <div class="metadata-tags">
@@ -68,54 +68,58 @@ class VideoPlayer {
                             ${metadata.mood && metadata.mood !== 'unknown' ? `<div class="metadata-mood">Mood: ${metadata.mood}</div>` : ''}
                         </div>
                     </div>
-                    <div class="loading-indicator" id="loadingIndicator">
-                        <div class="spinner"></div>
+                    <div class="loading-indicator" id="loadingIndicator" aria-hidden="true">
+                        <div class="spinner" role="status"></div>
                     </div>
                 </div>
                 
-                <div class="player-controls">
+                <div class="player-controls" role="toolbar" aria-label="Video player controls">
                     <div class="controls-row time-display-row">
-                        <span class="current-time" id="currentTime">00:00:00</span>
-                        <span class="trim-indicators" id="trimIndicators"></span>
-                        <span class="duration" id="duration">00:00:00</span>
+                        <span class="current-time" id="currentTime" aria-label="Current time">00:00:00</span>
+                        <span class="trim-indicators" id="trimIndicators" aria-live="polite"></span>
+                        <span class="duration" id="duration" aria-label="Total duration">00:00:00</span>
                     </div>
                     
-                    <div class="scrubber-container" id="scrubberContainer">
+                    <div class="scrubber-container" id="scrubberContainer" role="slider" aria-label="Video progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
                         <div class="scrubber-track">
-                            <div class="scrubber-buffered" id="scrubberBuffered"></div>
-                            <div class="trim-region" id="trimRegion"></div>
-                            <div class="scrubber-progress" id="scrubberProgress"></div>
-                            <div class="trim-handle trim-handle-in" id="trimHandleIn" data-handle="in" title="Set In Point">
-                                <div class="handle-marker">&#9662;</div>
-                                <div class="handle-label">IN</div>
+                            <div class="scrubber-buffered" id="scrubberBuffered" aria-hidden="true"></div>
+                            <div class="trim-region" id="trimRegion" aria-hidden="true"></div>
+                            <div class="scrubber-progress" id="scrubberProgress" aria-hidden="true"></div>
+                            <div class="trim-handle trim-handle-in" id="trimHandleIn" data-handle="in" role="slider" aria-label="Trim start point" tabindex="0">
+                                <div class="handle-marker" aria-hidden="true">&#9662;</div>
+                                <div class="handle-label" aria-hidden="true">IN</div>
                             </div>
-                            <div class="trim-handle trim-handle-out" id="trimHandleOut" data-handle="out" title="Set Out Point">
-                                <div class="handle-marker">&#9662;</div>
-                                <div class="handle-label">OUT</div>
+                            <div class="trim-handle trim-handle-out" id="trimHandleOut" data-handle="out" role="slider" aria-label="Trim end point" tabindex="0">
+                                <div class="handle-marker" aria-hidden="true">&#9662;</div>
+                                <div class="handle-label" aria-hidden="true">OUT</div>
                             </div>
                         </div>
-                        <input type="range" class="scrubber-input" id="scrubberInput" min="0" max="100" step="0.01" value="0">
+                        <input type="range" class="scrubber-input" id="scrubberInput" min="0" max="100" step="0.01" value="0" aria-label="Seek video position">
                     </div>
                     
                     <div class="controls-row main-controls">
-                        <div class="control-group left-controls">
-                            <button class="control-btn" id="playPauseBtn" title="Play/Pause (Space)">
-                                <span class="icon-play">▶</span>
-                                <span class="icon-pause">⏸</span>
+                        <div class="control-group left-controls" role="group" aria-label="Playback controls">
+                            <button class="control-btn" id="playPauseBtn" title="Play/Pause (Space)" aria-label="Play or pause video">
+                                <span class="icon-play" aria-hidden="true">▶</span>
+                                <span class="icon-pause" aria-hidden="true">⏸</span>
                             </button>
-                            <button class="control-btn" id="framePrevBtn" title="Previous Frame (← or J)">⏴</button>
-                            <button class="control-btn" id="frameNextBtn" title="Next Frame (→ or K)">⏵</button>
-                            <div class="volume-container">
-                                <button class="control-btn" id="muteBtn" title="Mute (M)">
-                                    <span class="icon-volume">🔊</span>
-                                    <span class="icon-mute">🔇</span>
+                            <button class="control-btn" id="framePrevBtn" title="Previous Frame (← or J)" aria-label="Previous frame">
+                                <span aria-hidden="true">⏴</span>
+                            </button>
+                            <button class="control-btn" id="frameNextBtn" title="Next Frame (→ or K)" aria-label="Next frame">
+                                <span aria-hidden="true">⏵</span>
+                            </button>
+                            <div class="volume-container" role="group" aria-label="Volume controls">
+                                <button class="control-btn" id="muteBtn" title="Mute (M)" aria-label="Toggle mute">
+                                    <span class="icon-volume" aria-hidden="true">🔊</span>
+                                    <span class="icon-mute" aria-hidden="true">🔇</span>
                                 </button>
-                                <input type="range" class="volume-slider" id="volumeSlider" min="0" max="1.5" step="0.01" value="1" title="Volume (0-150%)">
+                                <input type="range" class="volume-slider" id="volumeSlider" min="0" max="1.5" step="0.01" value="1" title="Volume (0-150%)" aria-label="Volume level">
                             </div>
                         </div>
                         
-                        <div class="control-group center-controls">
-                            <select class="speed-select" id="speedSelect" title="Playback Speed">
+                        <div class="control-group center-controls" role="group" aria-label="Playback settings">
+                            <select class="speed-select" id="speedSelect" title="Playback Speed" aria-label="Playback speed">
                                 <option value="0.25">0.25x</option>
                                 <option value="0.5">0.5x</option>
                                 <option value="0.75">0.75x</option>
@@ -124,16 +128,22 @@ class VideoPlayer {
                                 <option value="1.5">1.5x</option>
                                 <option value="2">2x</option>
                             </select>
-                            <button class="control-btn" id="loopBtn" title="Toggle Loop"><span class="loop-icon">🔁</span></button>
+                            <button class="control-btn" id="loopBtn" title="Toggle Loop" aria-label="Toggle loop playback" aria-pressed="false">
+                                <span class="loop-icon" aria-hidden="true">🔁</span>
+                            </button>
                         </div>
                         
-                        <div class="control-group right-controls">
-                            <button class="control-btn trim-btn" id="trimInBtn" title="Set In Point [">[<span class="trim-btn-label">IN</span></button>
-                            <button class="control-btn trim-btn" id="trimOutBtn" title="Set Out Point ]">]<span class="trim-btn-label">OUT</span></button>
-                            <button class="control-btn trim-btn" id="clearTrimBtn" title="Clear Trim Points">✕</button>
-                            <button class="control-btn" id="exportClipBtn" title="Export Clip">💾</button>
-                            <button class="control-btn" id="pipBtn" title="Picture in Picture"><span class="icon-pip">⧉</span></button>
-                            <button class="control-btn" id="fullscreenBtn" title="Fullscreen (F)"><span class="icon-fullscreen">⛶</span></button>
+                        <div class="control-group right-controls" role="group" aria-label="Trim and export controls">
+                            <button class="control-btn trim-btn" id="trimInBtn" title="Set In Point [" aria-label="Set trim start point">[<span class="trim-btn-label" aria-hidden="true">IN</span></button>
+                            <button class="control-btn trim-btn" id="trimOutBtn" title="Set Out Point ]" aria-label="Set trim end point">]<span class="trim-btn-label" aria-hidden="true">OUT</span></button>
+                            <button class="control-btn trim-btn" id="clearTrimBtn" title="Clear Trim Points" aria-label="Clear trim points">✕</button>
+                            <button class="control-btn" id="exportClipBtn" title="Export Clip" aria-label="Export trimmed clip">💾</button>
+                            <button class="control-btn" id="pipBtn" title="Picture in Picture" aria-label="Toggle picture in picture" aria-pressed="false">
+                                <span class="icon-pip" aria-hidden="true">⧉</span>
+                            </button>
+                            <button class="control-btn" id="fullscreenBtn" title="Fullscreen (F)" aria-label="Toggle fullscreen">
+                                <span class="icon-fullscreen" aria-hidden="true">⛶</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -380,11 +390,13 @@ class VideoPlayer {
     onEnterPiP() {
         this.isPiP = true;
         this.elements.pipBtn.classList.add('active');
+        this.elements.pipBtn.setAttribute('aria-pressed', 'true');
     }
 
     onLeavePiP() {
         this.isPiP = false;
         this.elements.pipBtn.classList.remove('active');
+        this.elements.pipBtn.setAttribute('aria-pressed', 'false');
     }
 
     onFullscreenChange() {
@@ -422,6 +434,7 @@ class VideoPlayer {
     toggleLoop() {
         this.loop = !this.loop;
         this.elements.loopBtn.classList.toggle('active', this.loop);
+        this.elements.loopBtn.setAttribute('aria-pressed', this.loop.toString());
     }
 
     setVolume(value) {

@@ -426,15 +426,78 @@ document.addEventListener('DOMContentLoaded', () => {
         document.addEventListener('keydown', (e) => {
             // Escape to exit multi-select mode
             if (e.key === 'Escape' && state.multiSelect) {
-                state.multiSelect = false;
-                state.selectedItems.clear();
-                document.querySelectorAll('.folder-card.selected, .video-card.selected').forEach(card => {
-                    card.classList.remove('selected');
-                    card.setAttribute('aria-selected', 'false');
-                });
-                updateMultiSelectToolbar();
+                exitMultiSelectMode();
             }
         });
+        
+        // Multi-select toolbar button handlers
+        const cancelBtn = document.getElementById('cancel-selection');
+        const addToPlaylistBtn = document.getElementById('add-to-playlist');
+        
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', exitMultiSelectMode);
+        }
+        
+        if (addToPlaylistBtn) {
+            addToPlaylistBtn.addEventListener('click', addSelectedToPlaylist);
+        }
+    }
+    
+    function exitMultiSelectMode() {
+        state.multiSelect = false;
+        state.selectedItems.clear();
+        document.querySelectorAll('.folder-card.selected, .video-card.selected').forEach(card => {
+            card.classList.remove('selected');
+            card.setAttribute('aria-selected', 'false');
+        });
+        updateMultiSelectToolbar();
+    }
+    
+    function addSelectedToPlaylist() {
+        const selectedIds = Array.from(state.selectedItems);
+        if (selectedIds.length === 0) return;
+        
+        // Dispatch custom event for playlist handling
+        const event = new CustomEvent('addToPlaylist', {
+            detail: { ids: selectedIds }
+        });
+        document.dispatchEvent(event);
+        
+        // Show feedback to user
+        showNotification(`${selectedIds.length} items ready to add to playlist`);
+        exitMultiSelectMode();
+    }
+    
+    function showNotification(message) {
+        const existing = document.querySelector('.notification-toast');
+        if (existing) existing.remove();
+        
+        const toast = document.createElement('div');
+        toast.className = 'notification-toast';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        toast.textContent = message;
+        
+        Object.assign(toast.style, {
+            position: 'fixed',
+            bottom: '160px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'var(--accent)',
+            color: 'white',
+            padding: '0.75rem 1.5rem',
+            borderRadius: 'var(--radius)',
+            zIndex: '1000',
+            fontWeight: '500'
+        });
+        
+        document.body.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transition = 'opacity 0.3s';
+            setTimeout(() => toast.remove(), 300);
+        }, 2000);
     }
 
     // Helpers
