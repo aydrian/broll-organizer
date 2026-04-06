@@ -11,7 +11,11 @@ WorkingDirectory=/home/openclaw/apps/broll-organizer
 Environment=HOME=/home/openclaw
 Environment=PATH=/home/openclaw/.local/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=/home/openclaw/apps/broll-organizer/.env
-ExecStart=/home/openclaw/.local/bin/uv run broll web "/media/openclaw/Crucial X10" --host 0.0.0.0 --port 5555
+Environment="BROLL_DRIVE_PATH=/media/openclaw/Crucial X10"
+Environment=BROLL_HOST=0.0.0.0
+Environment=BROLL_PORT=5555
+Environment=BROLL_THREADS=4
+ExecStart=/home/openclaw/.local/bin/uv run python -m broll.web.wsgi
 Restart=on-failure
 RestartSec=10
 StartLimitInterval=60s

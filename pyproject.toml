@@ -14,6 +14,7 @@ dependencies = [
     "reverse-geocoder>=1.5",
     "sqlite-vec>=0.1.7",
     "tqdm>=4.67",
+    "waitress>=3.0",
 ]
 
 [project.scripts]
