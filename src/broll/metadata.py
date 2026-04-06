@@ -151,13 +151,13 @@ def _normalize_datetime(dt_string: str) -> str:
 
 def extract_gps(file_path: str) -> dict[str, Any]:
     """
-    Extract GPS coordinates from video metadata using exiftool.
+    Extract GPS coordinates and accuracy from video metadata using exiftool.
 
     Works with:
     - iPhone .mp4/.mov files (GPS stored in QuickTime metadata)
     - DJI Osmo Pocket 3 .mp4 files (GPS in XMP/QuickTime tags)
 
-    Returns dict with: gps_latitude, gps_longitude (as floats, or None)
+    Returns dict with: gps_latitude, gps_longitude, gps_accuracy (as floats, or None)
     """
     try:
         cmd = [
@@ -172,6 +172,10 @@ def extract_gps(file_path: str) -> dict[str, Any]:
             "-Keys:GPSCoordinates",
             "-UserData:GPSCoordinates",
             "-ItemList:GPSCoordinates",
+            # GPS accuracy tags
+            "-GPSPositionError",  # iPhone horizontal accuracy in meters
+            "-GPSDOP",            # Dilution of precision
+            "-GPSHorizontalAccuracy",  # QuickTime horizontal accuracy
             file_path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
@@ -214,9 +218,22 @@ def extract_gps(file_path: str) -> dict[str, Any]:
         except (ValueError, TypeError):
             lat, lon = None, None
 
+    # Extract accuracy - check multiple possible tags
+    accuracy = None
+    for tag in ["GPSPositionError", "GPSHorizontalAccuracy", "GPSDOP"]:
+        val = info.get(tag)
+        if val is not None:
+            try:
+                accuracy = float(val)
+                if accuracy > 0:
+                    break
+            except (ValueError, TypeError):
+                continue
+
     return {
         "gps_latitude": lat,
         "gps_longitude": lon,
+        "gps_accuracy": accuracy,
     }
 
 

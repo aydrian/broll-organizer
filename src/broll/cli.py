@@ -185,6 +185,12 @@ def process(drive_path: str, force: bool, scan_only: bool):
                 metadata = extract_all_metadata(video_info['absolute_path'])
                 video_info.update(metadata)
 
+                # Set location_source based on GPS availability
+                if video_info.get('gps_latitude') is not None and video_info.get('gps_longitude') is not None:
+                    video_info['location_source'] = 'gps'
+                else:
+                    video_info['location_source'] = 'folder'
+
                 if not scan_only:
                     # Step 2: Extract keyframes
                     tqdm.write(f'  Extracting frames: {video_info['file_name']}')
@@ -244,6 +250,12 @@ def process(drive_path: str, force: bool, scan_only: bool):
                     video_info["time_of_day"] = None
                     video_info["thumbnail_path"] = None
                     video_info["processed_at"] = datetime.now(timezone.utc).isoformat()
+                    # Ensure location_source is set even on error
+                    if "location_source" not in video_info:
+                        if video_info.get('gps_latitude') is not None and video_info.get('gps_longitude') is not None:
+                            video_info['location_source'] = 'gps'
+                        else:
+                            video_info['location_source'] = 'folder'
                     db.insert_video(video_info)
                 except Exception:
                     pass
@@ -1303,3 +1315,162 @@ def stamp(drive_path: str, revision: str):
     except subprocess.CalledProcessError as e:
         click.echo(f"Stamp failed: {e.stderr}", err=True)
         raise SystemExit(1)
+
+
+# =============================================================================
+# GPS & Location Commands
+# =============================================================================
+
+@cli.command()
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--lat', type=float, help='Latitude of center point')
+@click.option('--lon', type=float, help='Longitude of center point')
+@click.option('--location', help='Location name to geocode (alternative to lat/lon)')
+@click.option('--radius', default='5km', help='Search radius (e.g., 5km, 2mi, 1000m)')
+@click.option('--limit', default=50, help='Maximum number of results')
+def nearby(drive: str, lat: float | None, lon: float | None, location: str | None, radius: str, limit: int):
+    """Find videos within a radius of a location using Haversine formula."""
+    import re
+    import urllib.request
+    import urllib.parse
+
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    # Parse radius with unit
+    radius_match = re.match(r'^([\d.]+)\s*(km|m|mi)?$', radius.lower())
+    if not radius_match:
+        click.echo(f"Invalid radius format: {radius}. Use e.g., 5km, 2mi, 1000m", err=True)
+        raise SystemExit(1)
+
+    radius_value = float(radius_match.group(1))
+    unit = radius_match.group(2) or 'km'
+
+    # Convert to kilometers
+    if unit == 'm':
+        radius_km = radius_value / 1000
+    elif unit == 'mi':
+        radius_km = radius_value * 1.60934
+    else:  # km
+        radius_km = radius_value
+
+    with Database(db_path) as db:
+        # Determine coordinates
+        if location:
+            # Geocode location name
+            cached = db.get_cached_location(location)
+            if cached:
+                lat, lon = cached['lat'], cached['lon']
+                click.echo(f"Using cached coordinates for '{location}': {lat:.5f}, {lon:.5f}")
+            else:
+                # Call Nominatim API
+                headers = {"User-Agent": "B-Roll-Organizer/0.3.0"}
+                params = urllib.parse.urlencode(
+                    {"q": location, "format": "json", "limit": 1, "addressdetails": 0}
+                )
+                url = f"https://nominatim.openstreetmap.org/search?{params}"
+
+                try:
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        if response.status != 200:
+                            click.echo(f"Geocoding failed: HTTP {response.status}", err=True)
+                            raise SystemExit(1)
+
+                        data = json.loads(response.read().decode())
+                        if not data:
+                            click.echo(f"Location not found: '{location}'", err=True)
+                            raise SystemExit(1)
+
+                        result = data[0]
+                        lat = float(result.get("lat"))
+                        lon = float(result.get("lon"))
+
+                        # Cache the result
+                        db.cache_location(location, lat, lon)
+                        click.echo(f"Geocoded '{location}': {lat:.5f}, {lon:.5f}")
+                except Exception as e:
+                    click.echo(f"Geocoding error: {e}", err=True)
+                    raise SystemExit(1)
+        elif lat is None or lon is None:
+            click.echo("Either --lat/--lon or --location is required", err=True)
+            raise SystemExit(1)
+
+        # Search for nearby videos
+        videos = db.nearby_videos(lat, lon, radius_km, limit)
+
+        if not videos:
+            click.echo(f"\nNo videos found within {radius} of the specified location.")
+            return
+
+        click.echo(f"\nFound {len(videos)} video(s) within {radius}:")
+        click.echo("-" * 80)
+
+        for video in videos:
+            distance = video.get('distance_km', 0)
+            location_name = video.get('gps_location_name') or 'Unknown'
+            source = video.get('location_source') or 'unknown'
+
+            click.echo(f"\n  {video['file_name']}")
+            click.echo(f"    Distance: {distance:.2f} km")
+            click.echo(f"    Location: {location_name} (source: {source})")
+            if video.get('scene_description'):
+                desc = video['scene_description'][:60]
+                if len(video['scene_description']) > 60:
+                    desc += "..."
+                click.echo(f"    Description: {desc}")
+
+
+@cli.command()
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--id', 'video_id', type=int, required=True, help='Video ID to update')
+@click.option('--lat', type=float, required=True, help='Latitude')
+@click.option('--lon', type=float, required=True, help='Longitude')
+@click.option('--name', help='Location name (auto-reverse-geocoded if not provided)')
+@click.option('--accuracy', type=float, help='GPS accuracy in meters')
+def set_location(drive: str, video_id: int, lat: float, lon: float, name: str | None, accuracy: float | None):
+    """Manually set GPS coordinates for a video."""
+    from .metadata import reverse_geocode
+
+    # Validate coordinates
+    if not (-90 <= lat <= 90):
+        click.echo(f"Invalid latitude: {lat}. Must be between -90 and 90.", err=True)
+        raise SystemExit(1)
+    if not (-180 <= lon <= 180):
+        click.echo(f"Invalid longitude: {lon}. Must be between -180 and 180.", err=True)
+        raise SystemExit(1)
+
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        # Verify video exists
+        video = db.get_video_by_id(video_id)
+        if not video:
+            click.echo(f"Video with ID {video_id} not found.", err=True)
+            raise SystemExit(1)
+
+        # Auto-reverse-geocode if name not provided
+        if name is None:
+            name = reverse_geocode(lat, lon)
+            if name:
+                click.echo(f"Reverse geocoded location: {name}")
+            else:
+                name = "Unknown Location"
+
+        # Update video location
+        db.update_video_location(video_id, lat, lon, name, accuracy)
+
+        click.echo(f"Updated location for '{video['file_name']}':")
+        click.echo(f"  Coordinates: {lat:.5f}, {lon:.5f}")
+        click.echo(f"  Location: {name}")
+        if accuracy:
+            click.echo(f"  Accuracy: {accuracy}m")
