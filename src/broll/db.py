@@ -184,7 +184,9 @@ class Database:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS location_cache (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                location_name   TEXT UNIQUE NOT NULL,
+                search_key      TEXT UNIQUE NOT NULL,
+                display_name    TEXT NOT NULL,
+                location_name   TEXT,
                 lat             REAL NOT NULL,
                 lon             REAL NOT NULL,
                 cached_at       TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
@@ -1025,10 +1027,111 @@ class Database:
         rows = conn.execute(
             "SELECT location_name, lat, lon, cached_at FROM location_cache ORDER BY location_name"
         ).fetchall()
-        
+
         return [
             {
                 "location_name": row[0],
+                "lat": row[1],
+                "lon": row[2],
+                "cached_at": row[3]
+            }
+            for row in rows
+        ]
+
+    def find_cached_location_by_query(self, query: str) -> dict[str, Any] | None:
+        """
+        Search cached locations by query - matches exact or partial search_key or display_name.
+
+        Returns the most recently cached matching result, or None if not found.
+        """
+        conn = self.connect()
+        search_term = f"%{query}%"
+        row = conn.execute(
+            """SELECT search_key, display_name, lat, lon, cached_at FROM location_cache
+               WHERE search_key = ?
+                  OR display_name LIKE ?
+                  OR search_key LIKE ?
+                  OR ? LIKE '%' || search_key || '%'
+               ORDER BY cached_at DESC LIMIT 1""",
+            (query, search_term, search_term, query)
+        ).fetchone()
+
+        if row:
+            return {
+                "search_key": row[0],
+                "display_name": row[1],
+                "lat": row[2],
+                "lon": row[3],
+                "cached_at": row[4]
+            }
+        return None
+
+    def get_cached_location_by_search_key(self, search_key: str) -> dict[str, Any] | None:
+        """
+        Get cached location by exact search key match (case-insensitive).
+
+        Returns dict with 'search_key', 'display_name', 'lat', 'lon', 'cached_at' or None.
+        """
+        conn = self.connect()
+        row = conn.execute(
+            """SELECT search_key, display_name, lat, lon, cached_at FROM location_cache
+               WHERE search_key = ?""",
+            (search_key.lower().strip(),)
+        ).fetchone()
+
+        if row:
+            return {
+                "search_key": row[0],
+                "display_name": row[1],
+                "lat": row[2],
+                "lon": row[3],
+                "cached_at": row[4]
+            }
+        return None
+
+    def cache_location_with_display_name(
+        self, search_key: str, display_name: str, lat: float, lon: float
+    ) -> bool:
+        """
+        Cache a location with separate search key and display name.
+        The search_key is normalized (lowercase) for matching queries.
+        The display_name is the full pretty name shown to users.
+
+        Returns True if successful.
+        """
+        conn = self.connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO location_cache (search_key, display_name, location_name, lat, lon)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(search_key) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    location_name = excluded.location_name,
+                    lat = excluded.lat,
+                    lon = excluded.lon,
+                    cached_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                """,
+                (search_key.lower().strip(), display_name, display_name, lat, lon)
+            )
+            conn.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error caching location: {e}")
+            return False
+
+    def get_recent_cached_locations(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Get most recently used cached locations, sorted by newest first."""
+        conn = self.connect()
+        rows = conn.execute(
+            """SELECT display_name, lat, lon, cached_at FROM location_cache
+               ORDER BY cached_at DESC LIMIT ?""",
+            (limit,)
+        ).fetchall()
+
+        return [
+            {
+                "display_name": row[0],
                 "lat": row[1],
                 "lon": row[2],
                 "cached_at": row[3]

@@ -680,17 +680,41 @@ def create_app(drive_path: str) -> Flask:
     def search_location():
         """
         Search for a location using OpenStreetMap Nominatim API.
+        Checks cache first for instant results, then queries Nominatim if needed.
         """
         import urllib.request
         import urllib.parse
+
+        from ..db import Database
 
         query = request.args.get("q", "").strip()
         if not query:
             return jsonify([])
 
-        headers = {"User-Agent": "B-Roll-Organizer/0.2.1"}
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
 
         try:
+            # Normalize query for cache lookup
+            cache_key = query.lower().strip()
+
+            # Check cache first - try exact match on search_key, then fuzzy search
+            cached = db.get_cached_location_by_search_key(cache_key)
+            if not cached:
+                # Try to find any cached location that matches this query
+                cached = db.find_cached_location_by_query(cache_key)
+
+            if cached:
+                # For cached results, return the display name
+                return jsonify([{
+                    "name": cached["display_name"],
+                    "lat": cached["lat"],
+                    "lon": cached["lon"],
+                    "type": "cached",
+                }])
+
+            headers = {"User-Agent": "B-Roll-Organizer/0.2.1"}
+
             params = urllib.parse.urlencode(
                 {"q": query, "format": "json", "limit": 5, "addressdetails": 0}
             )
@@ -705,17 +729,237 @@ def create_app(drive_path: str) -> Flask:
 
                 results = []
                 for item in data:
+                    lat = float(item.get("lat"))
+                    lon = float(item.get("lon"))
+                    name = item.get("display_name")
                     results.append({
-                        "name": item.get("display_name"),
-                        "lat": float(item.get("lat")),
-                        "lon": float(item.get("lon")),
+                        "name": name,
+                        "lat": lat,
+                        "lon": lon,
                         "type": item.get("type", "unknown"),
                     })
+                # Note: We don't cache here - only cache when user actually selects a location
 
                 return jsonify(results)
 
         except Exception as e:
             current_app.logger.error(f"Geocoding error: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/location/cache", methods=["POST"])
+    def cache_selected_location():
+        """
+        Cache a location when it's actually used (selected by user).
+        Stores both search key (normalized) and display name (full).
+
+        Request: {"search_key": "tokyo", "display_name": "Tokyo, Japan", "lat": 35.6762, "lon": 139.6503}
+        """
+        from ..db import Database
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        search_key = data.get("search_key", "").lower().strip()
+        display_name = data.get("display_name", "").strip()
+        lat = data.get("lat")
+        lon = data.get("lon")
+
+        if not search_key or not display_name or lat is None or lon is None:
+            return jsonify({"error": "Missing required fields"}), 400
+
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid coordinates"}), 400
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            db.cache_location_with_display_name(search_key, display_name, lat, lon)
+            return jsonify({"success": True})
+        except Exception as e:
+            current_app.logger.error(f"Error caching location: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+
+    @app.route("/api/location/recent")
+    def get_recent_locations():
+        """
+        Get recently used locations from cache.
+        Returns up to 10 most recently cached locations.
+        """
+        from ..db import Database
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            recent = db.get_recent_cached_locations(limit=10)
+            results = [
+                {
+                    "name": loc["location_name"],
+                    "lat": loc["lat"],
+                    "lon": loc["lon"],
+                    "cached_at": loc["cached_at"],
+                    "type": "recent"
+                }
+                for loc in recent
+            ]
+            return jsonify(results)
+        except Exception as e:
+            current_app.logger.error(f"Error fetching recent locations: {e}")
+            return jsonify([])
+        finally:
+            db.close()
+
+    @app.route("/api/location/parse-url", methods=["POST"])
+    def parse_location_url():
+        """
+        Parse a Google Maps URL to extract coordinates.
+        Supports various Google Maps URL formats including short URLs.
+
+        Request: {"url": "https://www.google.com/maps?q=35.6586,139.7454"}
+        Response: {"lat": 35.6586, "lon": 139.7454, "name": "Google Maps Location"}
+        """
+        import re
+        import urllib.request
+        import urllib.parse
+
+        class RedirectHandler(urllib.request.HTTPRedirectHandler):
+            """Handler that captures the final URL after redirects."""
+            def __init__(self):
+                super().__init__()
+                self.final_url = None
+
+            def http_error_302(self, req, fp, code, msg, headers):
+                self.final_url = headers.get('Location')
+                return super().http_error_302(req, fp, code, msg, headers)
+
+            def http_error_301(self, req, fp, code, msg, headers):
+                self.final_url = headers.get('Location')
+                return super().http_error_301(req, fp, code, msg, headers)
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        url = data.get("url", "").strip()
+        if not url:
+            return jsonify({"error": "No URL provided"}), 400
+
+        try:
+            lat = None
+            lon = None
+            name = "Google Maps Location"
+
+            # Handle Google Maps short URLs (follow redirects)
+            if "maps.app.goo.gl" in url or "goo.gl/maps" in url:
+                try:
+                    redirect_handler = RedirectHandler()
+                    opener = urllib.request.build_opener(redirect_handler)
+                    opener.addheaders = [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')]
+                    urllib.request.install_opener(opener)
+
+                    req = urllib.request.Request(url, method='GET')
+                    # Follow redirects and get final URL
+                    with urllib.request.urlopen(req, timeout=15) as response:
+                        final_url = response.geturl()
+                        if final_url and final_url != url:
+                            url = final_url
+                            current_app.logger.info(f"Expanded short URL to: {url[:100]}...")
+                except Exception as e:
+                    current_app.logger.warning(f"Could not expand short URL: {e}")
+                    # Continue with original URL
+
+            # Decode URL-encoded characters for easier parsing
+            decoded_url = urllib.parse.unquote(url)
+
+            # Try various Google Maps URL patterns (support both encoded and decoded URLs)
+
+            # Pattern 1: ?q=lat,lon or ?query=lat,lon (handles both %2C and ,)
+            query_match = re.search(r'[?&](q|query)=(-?\d+\.?\d*)[,%][2C]*(-?\d+\.?\d*)', url)
+            if not query_match:
+                query_match = re.search(r'[?&](q|query)=(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)', decoded_url)
+            if query_match:
+                lat = float(query_match.group(2))
+                lon = float(query_match.group(3))
+
+            # Pattern 2: /@lat,lon,zoom/ or /@lat,lon (handles both %2C and ,)
+            if lat is None or lon is None:
+                at_match = re.search(r'/@(-?\d+\.?\d*)[,\s%]+2?C?(-?\d+\.?\d*)(?:,\d+z)?', url)
+                if not at_match:
+                    at_match = re.search(r'/@(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)(?:,\d+z)?', decoded_url)
+                if at_match:
+                    lat = float(at_match.group(1))
+                    lon = float(at_match.group(2))
+
+            # Pattern 3: &ll=lat,lon (legacy format)
+            if lat is None or lon is None:
+                ll_match = re.search(r'[?&]ll=(-?\d+\.?\d*)[,\s%]+2?C?(-?\d+\.?\d*)', url)
+                if not ll_match:
+                    ll_match = re.search(r'[?&]ll=(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)', decoded_url)
+                if ll_match:
+                    lat = float(ll_match.group(1))
+                    lon = float(ll_match.group(2))
+
+            # Pattern 4: Google Maps data=... format with !3d{lat}!4d{lon}
+            if lat is None or lon is None:
+                data_match = re.search(r'!3d(-?\d+\.?\d+)!4d(-?\d+\.?\d+)', url)
+                if data_match:
+                    lat = float(data_match.group(1))
+                    lon = float(data_match.group(2))
+
+            # Pattern 5: Look for coordinates anywhere in the URL path (last resort)
+            if lat is None or lon is None:
+                # Match lat,lon pairs with 4+ decimal places (more specific)
+                coord_match = re.search(r'(-?\d{1,3}\.\d{4,})[,\s%]+2?C?(-?\d{1,3}\.\d{4,})', url)
+                if not coord_match:
+                    coord_match = re.search(r'(-?\d{1,3}\.\d{4,})[,\s]+(-?\d{1,3}\.\d{4,})', decoded_url)
+                if coord_match:
+                    potential_lat = float(coord_match.group(1))
+                    potential_lon = float(coord_match.group(2))
+                    # Validate coordinate bounds
+                    if -90 <= potential_lat <= 90 and -180 <= potential_lon <= 180:
+                        lat = potential_lat
+                        lon = potential_lon
+
+            # Extract location name from URL path if present
+            # Look for /place/PLACE_NAME/ or similar patterns
+            if lat is not None and lon is not None:
+                place_match = re.search(r'/place/([^/@]+)', decoded_url)
+                if place_match:
+                    # Decode and clean up the place name
+                    raw_name = place_match.group(1)
+                    # Replace + with spaces and decode any remaining URL encoding
+                    cleaned_name = raw_name.replace('+', ' ')
+                    cleaned_name = urllib.parse.unquote(cleaned_name)
+                    # Clean up extra spaces
+                    cleaned_name = ' '.join(cleaned_name.split())
+                    if cleaned_name:
+                        name = cleaned_name
+
+            if lat is not None and lon is not None:
+                # Final validation
+                if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    current_app.logger.info(f"Parsed coordinates from URL: {lat}, {lon}, name: {name}")
+                    return jsonify({
+                        "lat": lat,
+                        "lon": lon,
+                        "name": name,
+                        "source": "google_maps_url"
+                    })
+
+            current_app.logger.warning(f"Could not parse coordinates from URL: {url[:100]}...")
+            return jsonify({"error": "Could not extract coordinates from URL"}), 400
+
+        except Exception as e:
+            current_app.logger.error(f"URL parsing error: {e}")
             return jsonify({"error": str(e)}), 500
 
     @app.route("/api/video/<int:video_id>/location", methods=["POST"])

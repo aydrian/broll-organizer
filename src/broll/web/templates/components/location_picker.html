@@ -1,0 +1,82 @@
+{#
+  Reusable location picker modal component.
+
+  Usage:
+    {% from "components/location_picker.html" import location_picker_modal %}
+    {{ location_picker_modal() }}
+
+  Then in JavaScript:
+    LocationPicker.init({
+      onConfirm: (lat, lon, name) => { ... },
+      onCancel: () => { ... }
+    });
+    LocationPicker.open();
+#}
+
+{% macro location_picker_modal() -%}
+<!-- Location Picker Modal -->
+<div class="modal" id="location-picker-modal" role="dialog" aria-modal="true" aria-label="Set location">
+    <div class="modal-content">
+        <h3>Set Location</h3>
+
+        <!-- Google Maps URL paste -->
+        <div class="url-paste-section">
+            <input type="text" id="location-url-input" class="modal-input" placeholder="Paste Google Maps URL...">
+            <button type="button" class="btn secondary btn-icon" id="location-parse-url-btn" title="Parse URL">
+                <span aria-hidden="true">🌍</span>
+            </button>
+        </div>
+        <div id="location-url-error" class="url-error hidden"></div>
+
+        <div class="modal-divider">or search</div>
+
+        <!-- Search -->
+        <input type="text" id="location-search" class="modal-input" placeholder="Search for a place...">
+        <div id="location-results" class="location-results"></div>
+
+        <div class="modal-divider">or enter manually</div>
+
+        <!-- Manual entry -->
+        <div class="modal-input-row">
+            <input type="text" id="location-lat" class="modal-input" placeholder="Latitude" style="flex:1">
+            <input type="text" id="location-lon" class="modal-input" placeholder="Longitude" style="flex:1">
+        </div>
+        <input type="text" id="location-name" class="modal-input" placeholder="Location name (e.g., Tokyo Station)">
+
+        <div class="modal-actions">
+            <button type="button" class="btn secondary" id="cancel-location-picker">Cancel</button>
+            <button type="button" class="btn" id="confirm-set-location">Set Location</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.url-paste-section {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.url-paste-section input {
+    flex: 1;
+    min-width: 0; /* Prevent input from overflowing */
+}
+.btn-icon {
+    padding: 0;
+    width: 2.5rem;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.125rem;
+    flex-shrink: 0;
+}
+.url-error {
+    color: #dc2626;
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+}
+.url-error.hidden {
+    display: none;
+}
+</style>
+{%- endmacro %}

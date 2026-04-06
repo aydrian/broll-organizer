@@ -1,5 +1,6 @@
 <!-- src/broll/web/templates/browse.html -->
 {% extends "base.html" %}
+{% from "components/location_picker.html" import location_picker_modal %}
 {% block title %}Browse - B-Roll Catalog{% endblock %}
 
 {% block content %}
@@ -69,26 +70,10 @@
         </div>
     </div>
     
-    <!-- Location Picker Modal -->
-    <div class="modal" id="location-picker-modal" role="dialog" aria-modal="true" aria-label="Set location">
-        <div class="modal-content">
-            <h3>Set Location</h3>
-            <input type="text" id="location-search" class="modal-input" placeholder="Search for a place...">
-            <div id="location-results" class="location-results"></div>
-            <div class="modal-divider">or enter manually</div>
-            <div class="modal-input-row">
-                <input type="text" id="location-lat" class="modal-input" placeholder="Latitude" style="flex:1">
-                <input type="text" id="location-lon" class="modal-input" placeholder="Longitude" style="flex:1">
-            </div>
-            <input type="text" id="location-name" class="modal-input" placeholder="Location name (e.g., Tokyo Station)">
-            <div class="modal-actions">
-                <button type="button" class="btn secondary" id="cancel-location-picker">Cancel</button>
-                <button type="button" class="btn" id="confirm-set-location">Set Location</button>
-            </div>
-        </div>
-    </div>
+    {{ location_picker_modal() }}
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/location_picker.js"></script>
 <script src="/static/browse.js"></script>
 {% endblock %}

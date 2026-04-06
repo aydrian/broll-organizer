@@ -1135,122 +1135,53 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedIds = Array.from(state.selectedItems).filter(id => !isNaN(parseInt(id))).map(id => parseInt(id));
         if (selectedIds.length === 0) return;
 
-        const modal = document.getElementById('location-picker-modal');
-        const searchInput = document.getElementById('location-search');
-        const resultsContainer = document.getElementById('location-results');
-        const latInput = document.getElementById('location-lat');
-        const lonInput = document.getElementById('location-lon');
-        const nameInput = document.getElementById('location-name');
-        const confirmBtn = document.getElementById('confirm-set-location');
-        const cancelBtn = document.getElementById('cancel-location-picker');
-
-        let selectedLocation = null;
-        let searchTimeout = null;
-
-        // Search handler with debounce
-        searchInput.oninput = () => {
-            clearTimeout(searchTimeout);
-            const query = searchInput.value.trim();
-            if (!query) {
-                resultsContainer.innerHTML = '';
-                return;
-            }
-            
-            searchTimeout = setTimeout(async () => {
-                resultsContainer.innerHTML = '<p class="text-muted">Searching...</p>';
+        // Use the reusable LocationPicker module
+        LocationPicker.init({
+            onConfirm: async (lat, lon, name) => {
                 try {
-                    const response = await fetch(`/api/map/geocode?location=${encodeURIComponent(query)}`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        selectedLocation = { lat: data.lat, lon: data.lon, name: query };
-                        resultsContainer.innerHTML = `
-                            <div class="location-result selected" data-lat="${data.lat}" data-lon="${data.lon}">
-                                <span class="location-name">${escapeHtml(query)}</span>
-                                <span class="location-coords">${data.lat.toFixed(4)}, ${data.lon.toFixed(4)}</span>
-                            </div>
-                        `;
-                        latInput.value = data.lat.toFixed(6);
-                        lonInput.value = data.lon.toFixed(6);
-                        nameInput.value = query;
+                    const response = await fetch('/api/batch/set-location', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            video_ids: selectedIds,
+                            lat: lat,
+                            lon: lon,
+                            location_name: name
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        showNotification(`Set location for ${selectedIds.length} videos`);
+
+                        // Update the location display on selected cards
+                        selectedIds.forEach(id => {
+                            const card = document.querySelector(`.video-card[data-id="${id}"]`);
+                            if (card) {
+                                const meta = card.querySelector('.card-meta');
+                                if (meta) {
+                                    const resolution = meta.textContent.split('|')[0]?.trim() || '';
+                                    meta.textContent = resolution ? `${resolution} | ${name}` : name;
+                                }
+                            }
+                        });
+
+                        exitMultiSelectMode();
                     } else {
-                        resultsContainer.innerHTML = '<p class="text-muted">Location not found. Enter coordinates manually.</p>';
+                        alert(data.error || 'Failed to set location');
                     }
                 } catch (error) {
-                    resultsContainer.innerHTML = '<p class="error">Search failed. Enter coordinates manually.</p>';
+                    console.error('Error setting location:', error);
+                    alert('Failed to set location');
                 }
-            }, 500);
-        };
-
-        // Show modal
-        modal.classList.add('show');
-        searchInput.value = '';
-        resultsContainer.innerHTML = '';
-        latInput.value = '';
-        lonInput.value = '';
-        nameInput.value = '';
-
-        // Cancel handler
-        cancelBtn.onclick = () => {
-            modal.classList.remove('show');
-        };
-
-        // Close on backdrop click
-        modal.onclick = (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('show');
+            },
+            onCancel: () => {
+                // User cancelled, no action needed
             }
-        };
+        });
 
-        // Confirm handler
-        confirmBtn.onclick = async () => {
-            const lat = parseFloat(latInput.value);
-            const lon = parseFloat(lonInput.value);
-            const name = nameInput.value.trim();
-
-            if (isNaN(lat) || isNaN(lon) || !name) {
-                alert('Please enter valid latitude, longitude, and location name');
-                return;
-            }
-
-            try {
-                const response = await fetch('/api/batch/set-location', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        video_ids: selectedIds,
-                        lat: lat,
-                        lon: lon,
-                        location_name: name
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    modal.classList.remove('show');
-                    showNotification(`Set location for ${selectedIds.length} videos`);
-                    
-                    // Update the location display on selected cards
-                    selectedIds.forEach(id => {
-                        const card = document.querySelector(`.video-card[data-id="${id}"]`);
-                        if (card) {
-                            const meta = card.querySelector('.card-meta');
-                            if (meta) {
-                                const resolution = meta.textContent.split('|')[0]?.trim() || '';
-                                meta.textContent = resolution ? `${resolution} | ${name}` : name;
-                            }
-                        }
-                    });
-                    
-                    exitMultiSelectMode();
-                } else {
-                    alert(data.error || 'Failed to set location');
-                }
-            } catch (error) {
-                console.error('Error setting location:', error);
-                alert('Failed to set location');
-            }
-        };
+        LocationPicker.open();
     }
     
     function showNotification(message) {
