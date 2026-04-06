@@ -214,8 +214,23 @@ def process(drive_path: str, force: bool, scan_only: bool):
 
                 # Step 5: Save to database
                 video_info['processed_at'] = datetime.now(timezone.utc).isoformat()
-                db.insert_video(video_info)
+                video_id = db.insert_video(video_info)
                 processed += 1
+
+                # Step 6: Generate proxy for smooth web playback
+                if video_id:
+                    from .proxy import generate_proxy, get_proxy_path
+                    proxy_path = get_proxy_path(video_info['file_hash'], drive)
+                    if not proxy_path.exists():
+                        tqdm.write(f'  Generating proxy: {video_info["file_name"]}')
+                        success = generate_proxy(
+                            Path(video_info['absolute_path']),
+                            proxy_path,
+                            target_height=480,
+                            crf=28,
+                        )
+                        if success:
+                            db.update_video(video_info['relative_path'], {'proxy_path': str(proxy_path)})
 
             except Exception as e:
                 tqdm.write(f"  Error processing {video_info['file_name']}: {e}")

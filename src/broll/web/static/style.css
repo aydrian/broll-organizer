@@ -1265,14 +1265,13 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
     font-weight: 700;
 }
 
-/* Play/Pause Button */
-#playPauseBtn .icon-pause,
-.video-player-container.playing #playPauseBtn .icon-play {
-    display: none;
+/* Play/Pause Button - JS handles icon toggling */
+#playPauseBtn .icon-play {
+    display: inline;
 }
 
-.video-player-container.playing #playPauseBtn .icon-pause {
-    display: inline;
+#playPauseBtn .icon-pause {
+    display: none;
 }
 
 /* Volume Control */

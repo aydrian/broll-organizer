@@ -26,6 +26,7 @@ class VideoPlayer {
 
         this.video = null;
         this.isPlaying = false;
+        this.isWaiting = false;
         this.playbackRate = 1;
         this.loop = false;
         this.trimStart = null;
@@ -55,7 +56,7 @@ class VideoPlayer {
         this.container.innerHTML = `
             <div class="video-player-container" role="region" aria-label="Video player">
                 <div class="video-wrapper">
-                    <video class="video-element" preload="metadata" playsinline crossorigin="anonymous" aria-label="Video content">
+                    <video class="video-element" preload="auto" playsinline crossorigin="anonymous" aria-label="Video content">
                         <source src="${this.options.videoSrc}" type="video/mp4">
                         Your browser does not support video playback.
                     </video>
@@ -321,6 +322,27 @@ class VideoPlayer {
         this.video.volume = this.volume;
         this.updateVolumeIcon();
         this.loadTrimFromURL();
+
+        // Pre-buffer the first 10 seconds for smoother playback start
+        this.prebuffer(10);
+    }
+
+    prebuffer(seconds) {
+        // Ensure the browser has buffered enough data before playing
+        const checkBuffer = () => {
+            if (this.video.buffered.length > 0) {
+                const bufferedEnd = this.video.buffered.end(0);
+                if (bufferedEnd >= seconds || bufferedEnd >= this.video.duration) {
+                    return;
+                }
+            }
+            if (!this.video.paused) {
+                // If already playing, let it continue
+                return;
+            }
+            setTimeout(checkBuffer, 100);
+        };
+        checkBuffer();
     }
 
     onTimeUpdate() {
@@ -332,6 +354,21 @@ class VideoPlayer {
         const percent = (current / duration) * 100;
         this.elements.scrubberProgress.style.width = `${percent}%`;
         this.elements.scrubberInput.value = current;
+
+        // Monitor buffer to prevent stuttering - show loading if buffer is low
+        if (this.video.buffered.length > 0) {
+            const bufferedEnd = this.video.buffered.end(this.video.buffered.length - 1);
+            const bufferedAhead = bufferedEnd - current;
+            const isBufferLow = bufferedAhead < 1.0 && current < duration - 2;
+
+            if (isBufferLow && !this.video.paused) {
+                // We might stall soon - show loading indicator proactively
+                this.elements.loadingIndicator.classList.add('visible');
+            } else if (!isBufferLow && !this.isWaiting) {
+                // Buffer is healthy - hide loading
+                this.elements.loadingIndicator.classList.remove('visible');
+            }
+        }
 
         if (this.trimStart !== null && this.trimEnd !== null) {
             if (current < this.trimStart) {
@@ -350,18 +387,39 @@ class VideoPlayer {
     onPlay() {
         this.isPlaying = true;
         this.container.classList.add('playing');
+        this.updatePlayButton();
     }
 
     onPause() {
         this.isPlaying = false;
         this.container.classList.remove('playing');
+        this.updatePlayButton();
+    }
+
+    updatePlayButton() {
+        const playIcon = this.elements.playPauseBtn.querySelector('.icon-play');
+        const pauseIcon = this.elements.playPauseBtn.querySelector('.icon-pause');
+
+        if (this.isPlaying) {
+            if (playIcon) playIcon.style.display = 'none';
+            if (pauseIcon) pauseIcon.style.display = 'inline';
+            this.elements.playPauseBtn.setAttribute('aria-label', 'Pause video');
+            this.elements.playPauseBtn.setAttribute('title', 'Pause (Space)');
+        } else {
+            if (playIcon) playIcon.style.display = 'inline';
+            if (pauseIcon) pauseIcon.style.display = 'none';
+            this.elements.playPauseBtn.setAttribute('aria-label', 'Play video');
+            this.elements.playPauseBtn.setAttribute('title', 'Play (Space)');
+        }
     }
 
     onWaiting() {
+        this.isWaiting = true;
         this.elements.loadingIndicator.classList.add('visible');
     }
 
     onCanPlay() {
+        this.isWaiting = false;
         this.elements.loadingIndicator.classList.remove('visible');
     }
 
@@ -409,10 +467,47 @@ class VideoPlayer {
 
     togglePlay() {
         if (this.video.paused || this.video.ended) {
-            this.video.play();
+            // Ensure enough buffer before playing for smoother start
+            this.playWhenReady();
         } else {
             this.video.pause();
         }
+    }
+
+    async playWhenReady(minBufferSeconds = 2) {
+        // Wait until we have enough buffered data for smooth playback
+        const hasEnoughBuffer = () => {
+            if (this.video.buffered.length === 0) return false;
+            const bufferedEnd = this.video.buffered.end(this.video.buffered.length - 1);
+            const currentTime = this.video.currentTime;
+            const bufferedAhead = bufferedEnd - currentTime;
+            return bufferedAhead >= minBufferSeconds || bufferedEnd >= this.video.duration - 0.1;
+        };
+
+        if (!hasEnoughBuffer()) {
+            this.elements.loadingIndicator.classList.add('visible');
+            // Wait for canplay event or check periodically
+            await new Promise(resolve => {
+                const checkBuffer = () => {
+                    if (hasEnoughBuffer() || this.video.readyState >= 4) {
+                        resolve();
+                    } else {
+                        setTimeout(checkBuffer, 100);
+                    }
+                };
+                const onCanPlay = () => {
+                    if (hasEnoughBuffer()) {
+                        this.video.removeEventListener('canplaythrough', onCanPlay);
+                        resolve();
+                    }
+                };
+                this.video.addEventListener('canplaythrough', onCanPlay, { once: true });
+                checkBuffer();
+            });
+            this.elements.loadingIndicator.classList.remove('visible');
+        }
+
+        return this.video.play();
     }
 
     stepFrame(direction) {

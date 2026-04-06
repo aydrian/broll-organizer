@@ -680,14 +680,14 @@ class Database:
                 gps_latitude, gps_longitude, gps_location_name, folder_location,
                 gps_accuracy, location_source,
                 scene_description, tags, mood, camera_movement, time_of_day,
-                thumbnail_path, processed_at
+                thumbnail_path, proxy_path, processed_at
             ) VALUES (
                 :file_path, :file_name, :file_size, :file_hash, :source_device, :lrf_path,
                 :duration_seconds, :resolution, :width, :height, :fps, :codec, :creation_date,
                 :gps_latitude, :gps_longitude, :gps_location_name, :folder_location,
                 :gps_accuracy, :location_source,
                 :scene_description, :tags, :mood, :camera_movement, :time_of_day,
-                :thumbnail_path, :processed_at
+                :thumbnail_path, :proxy_path, :processed_at
             )
             """,
             {
@@ -716,6 +716,7 @@ class Database:
                 "camera_movement": video.get("camera_movement"),
                 "time_of_day": video.get("time_of_day"),
                 "thumbnail_path": video.get("thumbnail_path"),
+                "proxy_path": video.get("proxy_path"),
                 "processed_at": video.get(
                     "processed_at",
                     datetime.now(timezone.utc).isoformat(),

@@ -622,21 +622,53 @@ def create_app(drive_path: str) -> Flask:
         if not video:
             abort(404)
 
+        drive = Path(current_app.config["DRIVE_PATH"])
+
+        # Prefer proxy if available (low-bitrate for smooth playback)
+        proxy_path = video.get("proxy_path")
+        if proxy_path and Path(proxy_path).exists():
+            return send_file(
+                proxy_path,
+                mimetype="video/mp4",
+                conditional=True,
+            )
+
+        # Fallback to original file
         file_path = video["file_path"]
-        
+
         # Validate file_path to prevent directory traversal
         if file_path.startswith("..") or file_path.startswith("/"):
             abort(400)
-        
-        drive = Path(current_app.config["DRIVE_PATH"])
+
         video_path = (drive / file_path).resolve()
-        
+
         # Verify resolved path is within drive root
         if not str(video_path).startswith(str(drive)):
             abort(400)
 
         if not video_path.exists():
             abort(404)
+
+        # Generate proxy on-demand if not exists (async, don't block)
+        if not proxy_path:
+            try:
+                from ..proxy import generate_proxy, get_proxy_path
+                from ..db import Database
+                proxy_file = get_proxy_path(video["file_hash"], drive)
+                if not proxy_file.exists():
+                    # Start generation in background thread
+                    def generate():
+                        try:
+                            success = generate_proxy(video_path, proxy_file)
+                            if success:
+                                db_path = current_app.config["DB_PATH"]
+                                with Database(db_path) as db:
+                                    db.update_video(file_path, {"proxy_path": str(proxy_file)})
+                        except Exception:
+                            pass  # Silently fail, will retry next time
+                    threading.Thread(target=generate, daemon=True).start()
+            except Exception:
+                pass  # Fail silently, serve original
 
         return send_file(
             video_path,
@@ -1114,7 +1146,7 @@ def create_app(drive_path: str) -> Flask:
         if not requested_path.is_file():
             abort(403, "Not a file")
         
-        return send_file(requested_path, mimetype="video/mp4")
+        return send_file(requested_path, mimetype="video/mp4", conditional=True)
 
     @app.route("/api/batch/set-location", methods=["POST"])
     def api_batch_set_location():

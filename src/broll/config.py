@@ -25,6 +25,9 @@ DB_FILENAME: str = "broll_catalog.db"
 # Thumbnail directory name (stored in .broll/)
 THUMBS_DIRNAME: str = "thumbs"
 
+# Proxy video directory name (stored in .broll/)
+PROXY_DIRNAME: str = "proxy"
+
 # Provider selection: "fireworks" or "ollama"
 AI_PROVIDER: str = "fireworks"
 
@@ -73,3 +76,8 @@ def get_db_path(drive_root: str | Path) -> Path:
 def get_thumbs_dir(drive_root: str | Path) -> Path:
     """Return the full path to the thumbnails directory on the drive."""
     return get_app_dir(drive_root) / THUMBS_DIRNAME
+
+
+def get_proxy_dir(drive_root: str | Path) -> Path:
+    """Return the full path to the proxy video directory on the drive."""
+    return get_app_dir(drive_root) / PROXY_DIRNAME

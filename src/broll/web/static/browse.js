@@ -343,7 +343,10 @@ document.addEventListener('DOMContentLoaded', () => {
         offlineMode: false,
         multiSelect: false,
         selectedItems: new Set(),
-        allLoadedVideos: []
+        allLoadedVideos: [],
+        // Hover preview state
+        activeHoverCard: null,
+        hoverLoadTimeout: null
     };
 
     const elements = {
@@ -650,8 +653,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const ariaLabel = `${video.file_name}${desc ? ': ' + desc : ''}${video.duration_seconds ? ', Duration: ' + formatDuration(video.duration_seconds) : ''}${video.gps_location_name ? ', Location: ' + video.gps_location_name : ''}`;
             
             return `
-            <a href="/video/${video.id}" 
-               class="video-card" 
+            <a href="/video/${video.id}"
+               class="video-card"
                role="article"
                tabindex="0"
                aria-label="${escapeHtml(ariaLabel)}"
@@ -662,7 +665,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ${video.thumbnail_path
                 ? `<img src="/thumbnail/${video.file_hash}" alt="${escapeHtml(desc || 'Video thumbnail')}" loading="lazy">`
                 : '<div class="no-thumb" role="img" aria-label="No preview available">No Preview</div>'}
-                    <video class="hover-preview" preload="none" muted playsinline></video>
+                    <video class="hover-preview" preload="metadata" muted playsinline></video>
                     ${video.duration_seconds
                 ? `<span class="card-duration" aria-label="Duration: ${formatDuration(video.duration_seconds)}">${formatDuration(video.duration_seconds)}</span>`
                 : ''}
@@ -728,42 +731,39 @@ document.addEventListener('DOMContentLoaded', () => {
         const thumb = card.querySelector('.card-thumb');
         const img = thumb.querySelector('img');
         const preview = thumb.querySelector('.hover-preview');
-        const videoPath = card.dataset.videoPath;
-        const encodedVideoPath = encodeURIComponent(videoPath);
-        
-        if (!preview || !videoPath) return;
-        
-        let isPlaying = false;
-        let loadTimeout = null;
-        
+        const videoId = card.dataset.id;
+
+        if (!preview || !videoId) return;
+
         thumb.addEventListener('mouseenter', () => {
+            // Stop any existing preview on another card
+            if (state.activeHoverCard && state.activeHoverCard !== card) {
+                stopHoverPreview(state.activeHoverCard);
+            }
+
             // Delay loading to avoid flickering on quick passes
-            loadTimeout = setTimeout(() => {
-                if (!state.multiSelect && !isPlaying) {
-                    preview.src = `/video-file/${encodedVideoPath}`;
-                    preview.style.opacity = '0';
-                    preview.play().then(() => {
+            state.hoverLoadTimeout = setTimeout(() => {
+                if (!state.multiSelect) {
+                    preview.src = `/video/stream/${videoId}`;
+                    state.activeHoverCard = card;
+                    // Wait for enough data to buffer before showing
+                    preview.addEventListener('canplay', () => {
                         preview.style.opacity = '1';
                         if (img) img.style.opacity = '0';
-                        isPlaying = true;
-                    }).catch(() => {
-                        // Autoplay blocked or other error, just show thumbnail
+                    }, { once: true });
+                    preview.play().catch(() => {
+                        // Autoplay blocked or other error, restore thumbnail
+                        stopHoverPreview(card);
                     });
                 }
-            }, 200);
+            }, 100); // Reduced from 200ms for snappier response
         });
-        
+
         thumb.addEventListener('mouseleave', () => {
-            clearTimeout(loadTimeout);
-            if (isPlaying) {
-                preview.pause();
-                preview.currentTime = 0;
-                preview.style.opacity = '0';
-                if (img) img.style.opacity = '1';
-                isPlaying = false;
-            }
+            clearTimeout(state.hoverLoadTimeout);
+            stopHoverPreview(card);
         });
-        
+
         // Frame stepping with j/k when focused
         card.addEventListener('keydown', (e) => {
             if (state.multiSelect) return;
@@ -786,6 +786,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
+    }
+
+    function stopHoverPreview(card) {
+        const thumb = card.querySelector('.card-thumb');
+        if (!thumb) return;
+
+        const img = thumb.querySelector('img');
+        const preview = thumb.querySelector('.hover-preview');
+
+        if (preview) {
+            // Clone and replace to remove all event listeners and abort loading
+            const newPreview = preview.cloneNode(true);
+            preview.parentNode.replaceChild(newPreview, preview);
+            newPreview.style.opacity = '0';
+        }
+        if (img) {
+            img.style.opacity = '1';
+        }
+        if (state.activeHoverCard === card) {
+            state.activeHoverCard = null;
+        }
     }
 
     function handleCardClick(card, event) {
