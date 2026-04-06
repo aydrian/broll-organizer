@@ -1476,6 +1476,219 @@ def export(playlist_id: int, drive: str, format: str, output: str | None):
 
 
 # =============================================================================
+# Marker Commands
+# =============================================================================
+
+@cli.group()
+def marker():
+    """Manage video markers (clip in/out points)."""
+    pass
+
+
+@marker.command()
+@click.argument('video_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--in', 'in_seconds', required=True, type=float, help='In point in seconds')
+@click.option('--out', 'out_seconds', required=True, type=float, help='Out point in seconds')
+@click.option('--label', required=True, help='Marker label (e.g., "money shot", "intro")')
+@click.option('--color', default='#3b82f6', help='Marker color (hex code, default: #3b82f6)')
+def set(video_id: int, drive: str, in_seconds: float, out_seconds: float, label: str, color: str):
+    """Set a marker (in/out point) for a video."""
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    if in_seconds >= out_seconds:
+        click.echo("Error: in point must be less than out point.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        # Verify video exists
+        video = db.get_video_by_id(video_id)
+        if not video:
+            click.echo(f"Video with ID {video_id} not found.", err=True)
+            raise SystemExit(1)
+
+        # Check if marker with this label already exists
+        existing_markers = db.get_video_markers(video_id)
+        existing = next((m for m in existing_markers if m['label'] == label), None)
+
+        if existing:
+            # Update existing marker
+            db.update_marker(existing['id'], {
+                'in_seconds': in_seconds,
+                'out_seconds': out_seconds,
+                'color': color
+            })
+            click.echo(f"Updated marker '{label}' for '{video['file_name']}': {in_seconds:.1f}s - {out_seconds:.1f}s")
+        else:
+            # Create new marker
+            marker_id = db.create_marker(video_id, label, in_seconds, out_seconds, color)
+            duration = out_seconds - in_seconds
+            click.echo(f"Created marker '{label}' (ID: {marker_id}) for '{video['file_name']}'")
+            click.echo(f"  In: {in_seconds:.1f}s | Out: {out_seconds:.1f}s | Duration: {duration:.1f}s")
+
+
+@marker.command()
+@click.argument('video_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text', help='Output format')
+def list(video_id: int, drive: str, output_format: str):
+    """List all markers for a video."""
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        # Verify video exists
+        video = db.get_video_by_id(video_id)
+        if not video:
+            click.echo(f"Video with ID {video_id} not found.", err=True)
+            raise SystemExit(1)
+
+        markers = db.get_video_markers(video_id)
+
+        if output_format == 'json':
+            import json
+            click.echo(json.dumps(markers, indent=2, default=str))
+        else:
+            if not markers:
+                click.echo(f"No markers found for '{video['file_name']}'.")
+                return
+
+            click.echo(f"\nMarkers for '{video['file_name']}' (ID: {video_id}):")
+            click.echo("=" * 70)
+            click.echo(f"{'ID':<6} {'Label':<20} {'In':<10} {'Out':<10} {'Duration':<10} {'Color'}")
+            click.echo("-" * 70)
+
+            for m in markers:
+                duration = m['out_seconds'] - m['in_seconds']
+                click.echo(
+                    f"{m['id']:<6} {m['label']:<20} "
+                    f"{m['in_seconds']:<10.1f} {m['out_seconds']:<10.1f} "
+                    f"{duration:<10.1f} {m.get('color', '#3b82f6')}"
+                )
+            click.echo()
+
+
+@marker.command()
+@click.argument('marker_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.confirmation_option(prompt='Are you sure you want to delete this marker?')
+def delete(marker_id: int, drive: str):
+    """Delete a marker by ID."""
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        marker = db.get_marker(marker_id)
+        if not marker:
+            click.echo(f"Marker with ID {marker_id} not found.", err=True)
+            raise SystemExit(1)
+
+        db.delete_marker(marker_id)
+        click.echo(f"Deleted marker '{marker['label']}' (ID: {marker_id})")
+
+
+@marker.command()
+@click.argument('marker_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--output', required=True, type=click.Path(), help='Output file path for the exported clip')
+def export(marker_id: int, drive: str, output: str):
+    """Export a marker segment as a video clip using FFmpeg."""
+    import subprocess
+
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    output_path = Path(output)
+    if not output_path.suffix:
+        output_path = output_path.with_suffix('.mp4')
+
+    with Database(db_path) as db:
+        marker = db.get_marker(marker_id)
+        if not marker:
+            click.echo(f"Marker with ID {marker_id} not found.", err=True)
+            raise SystemExit(1)
+
+        video = db.get_video_by_id(marker['video_id'])
+        if not video:
+            click.echo(f"Video for marker not found.", err=True)
+            raise SystemExit(1)
+
+        # Build video path
+        file_path = video['file_path']
+        if file_path.startswith(str(drive_path)):
+            video_path = Path(file_path)
+        else:
+            video_path = drive_path / file_path
+
+        if not video_path.exists():
+            click.echo(f"Video file not found: {video_path}", err=True)
+            raise SystemExit(1)
+
+        start_time = marker['in_seconds']
+        duration = marker['out_seconds'] - start_time
+
+        click.echo(f"Exporting marker '{marker['label']}' from '{video['file_name']}'...")
+        click.echo(f"  In: {start_time:.1f}s | Out: {marker['out_seconds']:.1f}s | Duration: {duration:.1f}s")
+
+        # Build FFmpeg command for lossless trimming
+        cmd = [
+            'ffmpeg',
+            '-y',  # Overwrite output
+            '-ss', str(start_time),  # Start time
+            '-i', str(video_path),   # Input file
+            '-t', str(duration),     # Duration
+            '-c', 'copy',            # Copy streams (lossless)
+            '-avoid_negative_ts', '1',
+            '-movflags', '+faststart',
+            str(output_path)
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+
+            if result.returncode != 0:
+                click.echo(f"FFmpeg error: {result.stderr}", err=True)
+                raise SystemExit(1)
+
+            # Get output file size
+            file_size = output_path.stat().st_size
+            click.echo(f"Exported to: {output_path}")
+            click.echo(f"  File size: {file_size / (1024*1024):.1f} MB")
+
+        except subprocess.TimeoutExpired:
+            click.echo("Export timed out after 5 minutes.", err=True)
+            raise SystemExit(1)
+        except FileNotFoundError:
+            click.echo("FFmpeg not found. Please install FFmpeg.", err=True)
+            raise SystemExit(1)
+        except Exception as e:
+            click.echo(f"Export failed: {e}", err=True)
+            raise SystemExit(1)
+
+
+# =============================================================================
 # Migrate Command
 # =============================================================================
 

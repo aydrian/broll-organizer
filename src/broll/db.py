@@ -1596,3 +1596,87 @@ class Database:
             desc[0] for desc in conn.execute("SELECT * FROM videos LIMIT 0").description
         ]
         return [dict(zip(columns, row)) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Video marker operations (clip in/out points)
+    # ------------------------------------------------------------------
+
+    def create_marker(
+        self, video_id: int, label: str, in_seconds: float, out_seconds: float,
+        color: str = "#3b82f6"
+    ) -> int:
+        """Create a new video marker and return its ID."""
+        conn = self.connect()
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO video_markers (video_id, label, in_seconds, out_seconds, color)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (video_id, label, in_seconds, out_seconds, color)
+            )
+            conn.commit()
+            return cursor.lastrowid
+        except sqlite3.IntegrityError as e:
+            # Label already exists for this video
+            raise ValueError(f"Marker with label '{label}' already exists for this video") from e
+
+    def get_marker(self, marker_id: int) -> dict[str, Any] | None:
+        """Get a single marker by ID."""
+        conn = self.connect()
+        row = conn.execute(
+            "SELECT * FROM video_markers WHERE id = ?",
+            (marker_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_video_markers(self, video_id: int) -> list[dict[str, Any]]:
+        """Get all markers for a video, ordered by in_seconds."""
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT * FROM video_markers
+            WHERE video_id = ?
+            ORDER BY in_seconds ASC
+            """,
+            (video_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_marker(self, marker_id: int, updates: dict[str, Any]):
+        """Update marker fields."""
+        conn = self.connect()
+
+        # Validate updates don't violate unique constraint
+        if "label" in updates:
+            # Get current marker to check video_id
+            marker = self.get_marker(marker_id)
+            if marker:
+                existing = conn.execute(
+                    """
+                    SELECT id FROM video_markers
+                    WHERE video_id = ? AND label = ? AND id != ?
+                    """,
+                    (marker["video_id"], updates["label"], marker_id)
+                ).fetchone()
+                if existing:
+                    raise ValueError(
+                        f"Marker with label '{updates['label']}' already exists for this video"
+                    )
+
+        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+        sql = f"UPDATE video_markers SET {set_clause} WHERE id = ?"
+        conn.execute(sql, list(updates.values()) + [marker_id])
+        conn.commit()
+
+    def delete_marker(self, marker_id: int):
+        """Delete a marker by ID."""
+        conn = self.connect()
+        conn.execute("DELETE FROM video_markers WHERE id = ?", (marker_id,))
+        conn.commit()
+
+    def delete_all_video_markers(self, video_id: int):
+        """Delete all markers for a video."""
+        conn = self.connect()
+        conn.execute("DELETE FROM video_markers WHERE video_id = ?", (video_id,))
+        conn.commit()

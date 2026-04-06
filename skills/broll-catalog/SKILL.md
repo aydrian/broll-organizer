@@ -22,6 +22,7 @@ uv run broll search "tokyo sunset" --drive /media/openclaw/Crucial\ X10
 - **Thumbnails:** `/media/openclaw/Crucial X10/.broll/thumbs/`
 - **Current Catalog:** Japan 2025-26 footage (293 videos across 12 locations)
 - **Important:** Osmo Pocket 3 does NOT encode GPS data — location is inferred from folder names
+- **Clip Markers:** Use `broll marker` to save in/out points ("money shot" at seconds 12-18) and export segments
 
 ## Prerequisites
 
@@ -148,6 +149,26 @@ uv run broll nearby --drive /media/openclaw/Crucial\ X10 --location "Shibuya Sta
 uv run broll set-location --drive /media/openclaw/Crucial\ X10 --id 42 --lat 35.0 --lon 139.0
 ```
 
+### Set a clip marker (in/out points)
+```bash
+uv run broll marker set 42 --drive /media/openclaw/Crucial\ X10 --in 12.5 --out 18.3 --label "money shot"
+```
+
+### List markers for a video
+```bash
+uv run broll marker list 42 --drive /media/openclaw/Crucial\ X10
+```
+
+### Delete a marker
+```bash
+uv run broll marker delete 5 --drive /media/openclaw/Crucial\ X10
+```
+
+### Export a marked clip
+```bash
+uv run broll marker export 5 --drive /media/openclaw/Crucial\ X10 --output /tmp/money_shot.mp4
+```
+
 ### Launch web UI for browsing
 ```bash
 uv run broll web /media/openclaw/Crucial\ X10
@@ -187,6 +208,15 @@ All filters can be combined with each other and with keyword search. Query is no
 6. **Get details:** Use search with `--video-id` for full metadata
 7. **Access files:** Use the `file_path` from results to locate the actual video
 
+## Workflow: Marking Best Segments
+
+1. **Find the video:** Search for the clip using keyword or `--video-id`
+2. **Set markers:** Use `broll marker set` with in/out times and a label like "money shot" or "intro"
+3. **Multiple markers:** Add multiple segments per video with different labels
+4. **List markers:** View all markers for a video with `broll marker list`
+5. **Export clips:** Extract specific marker segments with `broll marker export`
+6. **Web UI:** In the browser, use 🚩 button to save current trim as marker
+
 ## Workflow: Catalog Maintenance
 
 1. **Check catalog health:** Run `broll doctor` to find missing files, orphaned records, or hash mismatches
@@ -207,3 +237,5 @@ uv run broll search "tokyo" --format text
 - **"command not found"** — Run `uv sync` from the broll-organizer directory
 - **Empty results** — Try broader search terms; catalog may need processing with `broll process`
 - **Missing thumbnails** — Thumbnails are generated during processing; not all videos may have them yet
+- **"in point must be less than out point"** — When setting markers, ensure --in value is less than --out value
+- **"Label already exists"** — Each marker label must be unique per video; use a different label or delete the existing one first

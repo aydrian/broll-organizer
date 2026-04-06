@@ -1676,6 +1676,219 @@ def create_app(drive_path: str) -> Flask:
             except:
                 pass
 
+    # ═════════════════════════════════════════════════════════════════
+    # Video Marker Routes (Clip In/Out Points)
+    # ═════════════════════════════════════════════════════════════════
+
+    @app.route("/api/videos/<int:video_id>/markers", methods=["GET"])
+    def api_get_video_markers(video_id: int):
+        """Get all markers for a video."""
+        from ..db import Database
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            markers = db.get_video_markers(video_id)
+            return jsonify({"markers": markers})
+        except Exception as e:
+            current_app.logger.error(f"Error fetching markers: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/videos/<int:video_id>/markers", methods=["POST"])
+    def api_create_marker(video_id: int):
+        """Create a new marker for a video."""
+        from ..db import Database
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        label = data.get("label", "").strip()
+        in_seconds = data.get("in_seconds")
+        out_seconds = data.get("out_seconds")
+        color = data.get("color", "#3b82f6")
+
+        if not label:
+            return jsonify({"error": "Label is required"}), 400
+
+        try:
+            in_seconds = float(in_seconds) if in_seconds is not None else None
+            out_seconds = float(out_seconds) if out_seconds is not None else None
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid time values"}), 400
+
+        if in_seconds is None or out_seconds is None:
+            return jsonify({"error": "Both in_seconds and out_seconds are required"}), 400
+
+        if in_seconds >= out_seconds:
+            return jsonify({"error": "in_seconds must be less than out_seconds"}), 400
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            marker_id = db.create_marker(video_id, label, in_seconds, out_seconds, color)
+            return jsonify({"success": True, "marker_id": marker_id})
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 409  # Conflict - label exists
+        except Exception as e:
+            current_app.logger.error(f"Error creating marker: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/markers/<int:marker_id>", methods=["PUT"])
+    def api_update_marker(marker_id: int):
+        """Update a marker."""
+        from ..db import Database
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        updates = {}
+        if "label" in data:
+            updates["label"] = data["label"].strip()
+        if "in_seconds" in data:
+            try:
+                updates["in_seconds"] = float(data["in_seconds"])
+            except (ValueError, TypeError):
+                return jsonify({"error": "Invalid in_seconds value"}), 400
+        if "out_seconds" in data:
+            try:
+                updates["out_seconds"] = float(data["out_seconds"])
+            except (ValueError, TypeError):
+                return jsonify({"error": "Invalid out_seconds value"}), 400
+        if "color" in data:
+            updates["color"] = data["color"]
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            db.update_marker(marker_id, updates)
+            return jsonify({"success": True})
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 409  # Conflict - label exists
+        except Exception as e:
+            current_app.logger.error(f"Error updating marker: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/markers/<int:marker_id>", methods=["DELETE"])
+    def api_delete_marker(marker_id: int):
+        """Delete a marker."""
+        from ..db import Database
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            db.delete_marker(marker_id)
+            return jsonify({"success": True})
+        except Exception as e:
+            current_app.logger.error(f"Error deleting marker: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/markers/<int:marker_id>/export", methods=["POST"])
+    def api_export_marker(marker_id: int):
+        """Export a marker segment as a video clip."""
+        import subprocess
+        import tempfile
+        import os
+
+        from ..db import Database
+
+        data = request.get_json() or {}
+        filename = data.get("filename", "marker_clip.mp4")
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            # Get marker details
+            marker = db.get_marker(marker_id)
+            if not marker:
+                return jsonify({"error": "Marker not found"}), 404
+
+            # Get video details
+            video = get_video_by_id(marker["video_id"])
+            if not video:
+                return jsonify({"error": "Video not found"}), 404
+
+            file_path = video.get("file_path")
+            drive_path = Path(current_app.config["DRIVE_PATH"])
+
+            # Handle both relative and absolute paths
+            if file_path.startswith(str(drive_path)):
+                video_path = Path(file_path)
+            else:
+                video_path = drive_path / file_path
+
+            # Security check
+            try:
+                video_path.resolve().relative_to(drive_path.resolve())
+            except ValueError:
+                return jsonify({"error": "Invalid file path"}), 400
+
+            if not video_path.exists():
+                return jsonify({"error": "Video file not found"}), 404
+
+            # Calculate duration
+            start_time = marker["in_seconds"]
+            end_time = marker["out_seconds"]
+            clip_duration = end_time - start_time
+
+            # Create temporary file
+            temp_dir = tempfile.gettempdir()
+            safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
+            if not safe_filename.endswith(".mp4"):
+                safe_filename += ".mp4"
+            output_path = Path(temp_dir) / safe_filename
+
+            # Build FFmpeg command for lossless trimming
+            cmd = [
+                "ffmpeg",
+                "-y",  # Overwrite output
+                "-ss", str(start_time),  # Start time
+                "-i", str(video_path),  # Input file
+                "-t", str(clip_duration),  # Duration
+                "-c", "copy",  # Copy streams (lossless)
+                "-avoid_negative_ts", "1",  # Avoid negative timestamps
+                "-movflags", "+faststart",  # Web optimization
+                str(output_path)
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+
+            if result.returncode != 0:
+                current_app.logger.error(f"FFmpeg error: {result.stderr}")
+                return jsonify({"error": "Failed to export clip", "details": result.stderr}), 500
+
+            # Return the file as a downloadable response
+            return send_file(
+                output_path,
+                mimetype="video/mp4",
+                as_attachment=True,
+                download_name=safe_filename
+            )
+
+        except subprocess.TimeoutExpired:
+            return jsonify({"error": "Export timed out"}), 500
+        except Exception as e:
+            current_app.logger.error(f"Marker export error: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            # Clean up temp file
+            try:
+                if output_path.exists():
+                    os.remove(output_path)
+            except:
+                pass
+
     @app.route("/video-file/<path:file_path>")
     def serve_video_file(file_path):
         """

@@ -31,6 +31,8 @@ class VideoPlayer {
         this.loop = false;
         this.trimStart = null;
         this.trimEnd = null;
+        this.markers = [];           // Array of {id, label, in_seconds, out_seconds, color}
+        this.activeMarkerId = null;  // Currently selected marker
         this.volume = 1;
         this.isFullscreen = false;
         this.isPiP = false;
@@ -138,6 +140,7 @@ class VideoPlayer {
                             <button class="control-btn trim-btn" id="trimInBtn" title="Set In Point [" aria-label="Set trim start point">[<span class="trim-btn-label" aria-hidden="true">IN</span></button>
                             <button class="control-btn trim-btn" id="trimOutBtn" title="Set Out Point ]" aria-label="Set trim end point">]<span class="trim-btn-label" aria-hidden="true">OUT</span></button>
                             <button class="control-btn trim-btn" id="clearTrimBtn" title="Clear Trim Points" aria-label="Clear trim points">✕</button>
+                            <button class="control-btn" id="saveMarkerBtn" title="Save as Marker (Shift+M)" aria-label="Save trim as marker">🚩</button>
                             <button class="control-btn" id="exportClipBtn" title="Export Clip" aria-label="Export trimmed clip">💾</button>
                             <button class="control-btn" id="pipBtn" title="Picture in Picture" aria-label="Toggle picture in picture" aria-pressed="false">
                                 <span class="icon-pip" aria-hidden="true">⧉</span>
@@ -177,6 +180,7 @@ class VideoPlayer {
             trimInBtn: this.container.querySelector('#trimInBtn'),
             trimOutBtn: this.container.querySelector('#trimOutBtn'),
             clearTrimBtn: this.container.querySelector('#clearTrimBtn'),
+            saveMarkerBtn: this.container.querySelector('#saveMarkerBtn'),
             exportClipBtn: this.container.querySelector('#exportClipBtn'),
             pipBtn: this.container.querySelector('#pipBtn'),
             fullscreenBtn: this.container.querySelector('#fullscreenBtn'),
@@ -207,6 +211,7 @@ class VideoPlayer {
         this.elements.trimInBtn.addEventListener('click', () => this.setTrimPoint('in'));
         this.elements.trimOutBtn.addEventListener('click', () => this.setTrimPoint('out'));
         this.elements.clearTrimBtn.addEventListener('click', () => this.clearTrim());
+        this.elements.saveMarkerBtn.addEventListener('click', () => this.saveCurrentTrimAsMarker());
         this.elements.exportClipBtn.addEventListener('click', () => this.exportClip());
         this.elements.pipBtn.addEventListener('click', () => this.togglePiP());
         this.elements.fullscreenBtn.addEventListener('click', () => this.toggleFullscreen());
@@ -275,7 +280,12 @@ class VideoPlayer {
                     break;
                 case 'm':
                 case 'M':
-                    this.toggleMute();
+                    if (e.shiftKey) {
+                        e.preventDefault();
+                        this.saveCurrentTrimAsMarker();
+                    } else {
+                        this.toggleMute();
+                    }
                     break;
                 case '[':
                 case 'i':
@@ -322,6 +332,7 @@ class VideoPlayer {
         this.video.volume = this.volume;
         this.updateVolumeIcon();
         this.loadTrimFromURL();
+        this.loadMarkers();  // Load markers for this video
 
         // Pre-buffer the first 10 seconds for smoother playback start
         this.prebuffer(10);
@@ -897,12 +908,208 @@ class VideoPlayer {
         notification.className = 'player-notification';
         notification.textContent = message;
         this.container.appendChild(notification);
-        
+
         requestAnimationFrame(() => notification.classList.add('show'));
         setTimeout(() => {
             notification.classList.remove('show');
             setTimeout(() => notification.remove(), 300);
         }, 3000);
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // Marker (Clip In/Out Points) Methods
+    // ═════════════════════════════════════════════════════════════════
+
+    async loadMarkers() {
+        """Load markers from the API for this video."""
+        try {
+            const response = await fetch(`/api/videos/${this.videoId}/markers`);
+            if (!response.ok) {
+                throw new Error('Failed to load markers');
+            }
+            const data = await response.json();
+            this.markers = data.markers || [];
+            this.renderMarkerIndicators();
+            return this.markers;
+        } catch (error) {
+            console.error('Error loading markers:', error);
+            return [];
+        }
+    }
+
+    async saveMarker(label, inSeconds, outSeconds, color = '#3b82f6') {
+        """Save a new marker for the current video."""
+        try {
+            const response = await fetch(`/api/videos/${this.videoId}/markers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    label: label,
+                    in_seconds: inSeconds,
+                    out_seconds: outSeconds,
+                    color: color
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to save marker');
+            }
+
+            const data = await response.json();
+            await this.loadMarkers();  // Refresh markers
+            this.showNotification(`Marker '${label}' saved`);
+            return data.marker_id;
+        } catch (error) {
+            console.error('Error saving marker:', error);
+            alert('Failed to save marker: ' + error.message);
+            return null;
+        }
+    }
+
+    async deleteMarker(markerId) {
+        """Delete a marker by ID."""
+        try {
+            const response = await fetch(`/api/markers/${markerId}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to delete marker');
+            }
+
+            await this.loadMarkers();
+            this.showNotification('Marker deleted');
+        } catch (error) {
+            console.error('Error deleting marker:', error);
+            alert('Failed to delete marker');
+        }
+    }
+
+    async exportMarker(markerId) {
+        """Export a marker segment as a video file."""
+        const marker = this.markers.find(m => m.id === markerId);
+        if (!marker) {
+            alert('Marker not found');
+            return;
+        }
+
+        const formatTimeHMS = (seconds) => {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${h}h${m.toString().padStart(2, '0')}m${s.toString().padStart(2, '0')}s`;
+        };
+
+        const baseName = (this.options.metadata.file_name || 'clip').replace(/\.[^/.]+$/, '');
+        const filename = `${baseName}_${marker.label}_${formatTimeHMS(marker.in_seconds)}-${formatTimeHMS(marker.out_seconds)}.mp4`;
+
+        try {
+            const response = await fetch(`/api/markers/${markerId}/export`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: filename })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Export failed');
+            }
+
+            // Download the file
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+
+            this.showNotification(`Marker exported: ${filename}`);
+        } catch (error) {
+            console.error('Export error:', error);
+            alert('Export failed: ' + error.message);
+        }
+    }
+
+    saveCurrentTrimAsMarker() {
+        """Save the current trim region as a new marker."""
+        if (this.trimStart === null || this.trimEnd === null) {
+            alert('Please set both IN and OUT trim points first');
+            return;
+        }
+
+        const label = prompt('Enter marker label (e.g., "money shot"):');
+        if (!label || label.trim() === '') {
+            return;
+        }
+
+        // Generate a random color from a palette
+        const colors = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+
+        this.saveMarker(label.trim(), this.trimStart, this.trimEnd, color);
+    }
+
+    loadMarkerIntoTrim(markerId) {
+        """Load a marker's in/out points into the trim region."""
+        const marker = this.markers.find(m => m.id === markerId);
+        if (!marker) return;
+
+        this.trimStart = marker.in_seconds;
+        this.trimEnd = marker.out_seconds;
+        this.activeMarkerId = markerId;
+        this.updateTrimUI();
+        this.updateTrimIndicators();
+        this.updateURLWithTrim();
+        this.seekTo(marker.in_seconds);
+
+        if (this.options.onTrim) {
+            this.options.onTrim({ start: this.trimStart, end: this.trimEnd });
+        }
+    }
+
+    jumpToMarker(markerId) {
+        """Jump to a marker's in point."""
+        const marker = this.markers.find(m => m.id === markerId);
+        if (marker) {
+            this.seekTo(marker.in_seconds);
+        }
+    }
+
+    renderMarkerIndicators() {
+        """Render visual indicators for markers on the scrubber."""
+        // Remove existing markers
+        const existingMarkers = this.container.querySelectorAll('.marker-indicator');
+        existingMarkers.forEach(m => m.remove());
+
+        if (!this.video.duration || this.markers.length === 0) return;
+
+        const track = this.container.querySelector('.scrubber-track');
+        if (!track) return;
+
+        this.markers.forEach(marker => {
+            const leftPercent = (marker.in_seconds / this.video.duration) * 100;
+            const widthPercent = ((marker.out_seconds - marker.in_seconds) / this.video.duration) * 100;
+
+            const indicator = document.createElement('div');
+            indicator.className = 'marker-indicator';
+            indicator.style.cssText = `
+                position: absolute;
+                left: ${leftPercent}%;
+                width: ${widthPercent}%;
+                height: 4px;
+                bottom: 0;
+                background-color: ${marker.color || '#3b82f6'};
+                border-radius: 2px;
+                pointer-events: none;
+                z-index: 3;
+            `;
+            indicator.title = `${marker.label} (${this.formatTime(marker.in_seconds)} - ${this.formatTime(marker.out_seconds)})`;
+            track.appendChild(indicator);
+        });
     }
 }
 
