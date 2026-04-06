@@ -858,22 +858,6 @@ def thumbnail(video_id: int, drive: str, base64_output: bool, output_path: str |
         click.echo(thumb_path)
 
 
-@cli.command()
-@click.argument('drive_path', type=click.Path(exists=True, file_okay=False))
-@click.option('--show-status', is_flag=True, help='Show current migration status')
-def migrate(drive_path: str, show_status: bool):
-    """Run database migrations on the external drive.
-    
-    This upgrades the database schema to the latest version.
-    Use --show-status to see current migration state without running migrations.
-    """
-    drive = Path(drive_path)
-    db_path = get_db_path(drive)
-    
-    # Ensure .broll directory exists
-    app_dir = db_path.parent
-    app_dir.mkdir(parents=True, exist_ok=True)
-    
 # =============================================================================
 # Playlist Commands
 # =============================================================================
@@ -1225,4 +1209,82 @@ def migrate(drive_path: str, show_status: bool):
             click.echo(f"   Current: {status}")
     else:
         click.echo("Migration failed", err=True)
+        raise SystemExit(1)
+
+
+@cli.command()
+@click.argument('drive_path', type=click.Path(exists=True, file_okay=False))
+@click.option('--revision', default='da98fc08f8df', help='Alembic revision to stamp (default: da98fc08f8df for initial schema)')
+def stamp(drive_path: str, revision: str):
+    """Mark an existing database as migrated without running migrations.
+
+    Use this for databases created before Alembic was added to the project.
+    This marks the database as being at the specified revision without
+    actually executing any migration SQL.
+
+    After stamping, you can run 'broll migrate' to apply any newer migrations.
+
+    \b
+    Example:
+        broll stamp /mnt/external-drive
+        broll stamp /mnt/external-drive --revision head
+    """
+    drive = Path(drive_path)
+    db_path = get_db_path(drive)
+
+    if not db_path.exists():
+        click.echo(f"Database not found at {db_path}", err=True)
+        click.echo("This command is for existing databases that need migration stamping.", err=True)
+        click.echo("For new drives, use 'broll init' instead.", err=True)
+        raise SystemExit(1)
+
+    # Verify it looks like a broll database (has videos table)
+    try:
+        with Database(db_path) as db:
+            conn = db.connect()
+            result = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='videos'"
+            ).fetchone()
+            if not result:
+                click.echo(f"Database at {db_path} does not appear to be a broll database.", err=True)
+                click.echo("Expected 'videos' table not found.", err=True)
+                raise SystemExit(1)
+    except Exception as e:
+        click.echo(f"Error checking database: {e}", err=True)
+        raise SystemExit(1)
+
+    # Find the project root (where alembic.ini lives)
+    project_root = Path(__file__).parent.parent.parent
+    alembic_ini = project_root / "alembic.ini"
+
+    if not alembic_ini.exists():
+        click.echo(f"Alembic configuration not found at {alembic_ini}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Stamping database at {db_path} with revision '{revision}'...")
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "alembic",
+                "-c", str(alembic_ini),
+                "-x", f"drive_path={drive_path}",
+                "stamp", revision
+            ],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        click.echo("Stamp complete!")
+
+        # Show current status
+        status = _get_migration_status(drive)
+        if status:
+            click.echo(f"   Current revision: {status}")
+
+        click.echo("\nYou can now run 'broll migrate' to apply any newer migrations.")
+
+    except subprocess.CalledProcessError as e:
+        click.echo(f"Stamp failed: {e.stderr}", err=True)
         raise SystemExit(1)
