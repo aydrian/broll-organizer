@@ -231,6 +231,128 @@ CLI commands output JSON by default. Parse with `jq` or add for human-readable:
 uv run broll search "tokyo" --format text
 ```
 
+## Workflow: Project-Based Content Creation
+
+Projects are content creation units that organize clips (marked segments) for export to Canva.
+
+### Create a Project from a Content Idea
+
+```bash
+# Create project with metadata
+uv run broll project create "Hidden Onsen Gems" \
+  --drive /media/openclaw/Crucial\ X10 \
+  --idea-ref "idea-123" \
+  --aspect 9:16 \
+  --resolution 1080p \
+  --duration 60 \
+  --status planning
+```
+
+### Add Clips to a Project
+
+```bash
+# Add a marked segment to project (position is auto-appended)
+uv run broll project add-clip 456 \
+  --drive /media/openclaw/Crucial\ X10 \
+  --marker 78 \
+  --notes "Opening shot with steam rising"
+
+# Add whole video (use when no specific marker needed)
+uv run broll project add-clip 456 \
+  --drive /media/openclaw/Crucial\ X10 \
+  --video 123 \
+  --notes "B-roll transition footage"
+
+# Reorder clips in project
+uv run broll project reorder 456 --clips 78,91,103,45
+```
+
+### List and Manage Projects
+
+```bash
+# List all projects with status
+uv run broll project list --drive /media/openclaw/Crucial\ X10
+
+# Filter by status or aspect ratio
+uv run broll project list --drive /media/openclaw/Crucial\ X10 --status gathering --aspect 9:16
+
+# Show project details with clips
+uv run broll project show 456 --drive /media/openclaw/Crucial\ X10
+
+# Update project metadata
+uv run broll project update 456 \
+  --drive /media/openclaw/Crucial\ X10 \
+  --status ready \
+  --script ./voiceover.txt
+
+# Delete project
+uv run broll project delete 456 --drive /media/openclaw/Crucial\ X10
+```
+
+### Search with Usage Awareness (Heatmap)
+
+```bash
+# Find clips not yet used in a project
+uv run broll search temple \
+  --drive /media/openclaw/Crucial\ X10 \
+  --unused-in-project 456
+
+# Search with usage counts shown (heatmap)
+uv run broll search temple \
+  --drive /media/openclaw/Crucial\ X10 \
+  --show-usage
+
+# Check where a clip is used
+uv run broll clip-usage --video 123 --marker 78 --drive /media/openclaw/Crucial\ X10
+```
+
+### Export Project for Canva
+
+```bash
+# Export as ZIP with MP4 clips + voiceover script
+uv run broll project export 456 \
+  --drive /media/openclaw/Crucial\ X10 \
+  --format canva \
+  --output ./exports/hidden_onsen.zip
+
+# ZIP contains:
+#   001.mp4, 002.mp4, ... (clips in project order)
+#   voiceover.txt (copy-paste ready script)
+```
+
+## Integration: Content Ideas and Projects
+
+The OpenClaw Agent manages content-ideas.md and creates projects from ideas.
+
+### Agent Workflow
+
+1. **Create content idea** in `content-ideas.md` with frontmatter ID:
+   ```markdown
+   ---
+   id: idea-123
+   status: planning
+   ---
+   # 5 Hidden Onsen in Beppu
+   ```
+
+2. **Create project from idea:**
+   ```bash
+   uv run broll project create "Hidden Onsen Gems" \
+     --drive /media/openclaw/Crucial\ X10 \
+     --idea-ref "idea-123" \
+     --aspect 9:16 --duration 60
+     ```
+
+3. **Update content-ideas.md** with project reference (Agent responsibility):
+   ```markdown
+   ---
+   id: idea-123
+   status: in_progress
+   ---
+   # 5 Hidden Onsen in Beppu
+   - **Project:** [#456](broll://project/456) (status: gathering clips)
+   ```
+
 ## Troubleshooting
 
 - **"Database not found"** — Check if the Crucial X10 drive is mounted at `/media/openclaw/Crucial X10`
