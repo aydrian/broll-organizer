@@ -15,11 +15,12 @@ RRF_K = 60
 
 
 def hybrid_search(
-    query: str,
+    query: str | None,
     db: Database,
     limit: int = 10,
     fts_weight: float = 1.0,
     vec_weight: float = 1.0,
+    filters: dict | None = None,
 ) -> list[dict]:
     """
     Perform hybrid search combining keyword (FTS5) and semantic (vector) results.
@@ -29,11 +30,12 @@ def hybrid_search(
     Final results are sorted by combined score.
 
     Args:
-        query: The search query string.
+        query: The search query string. If None/empty, only filters are used.
         db: Database connection.
         limit: Max number of results to return.
         fts_weight: Weight multiplier for keyword search results.
         vec_weight: Weight multiplier for semantic search results.
+        filters: Optional dict of structured filters (see db.build_filtered_query)
 
     Returns:
         List of video dicts, sorted by relevance, with a 'search_score' field.
@@ -41,11 +43,36 @@ def hybrid_search(
     # How many candidates to fetch from each method before fusing
     candidate_pool = limit * 3
 
+    # ── Structured filters (if provided) ──
+    filter_ids: set[int] | None = None
+    if filters:
+        filter_ids = set(db.get_filtered_ids(filters, limit=candidate_pool * 2))
+        if not filter_ids:
+            return []  # No videos match the filters
+
     # ── FTS5 keyword search ──
-    fts_results = _fts_search(query, db, candidate_pool)
+    if query:
+        fts_results = _fts_search(query, db, candidate_pool)
+    else:
+        fts_results = []
 
     # ── Semantic vector search ──
-    vec_results = _vector_search(query, db, candidate_pool)
+    if query:
+        vec_results = _vector_search(query, db, candidate_pool)
+    else:
+        vec_results = []
+
+    # ── Handle filters-only search (no text query) ──
+    if not query:
+        if filter_ids:
+            # Return filtered videos without scoring
+            videos = db.get_videos_by_ids(list(filter_ids)[:limit])
+            for video in videos:
+                video["search_score"] = 1.0
+                video["in_fts"] = False
+                video["in_vec"] = False
+            return videos
+        return []
 
     # ── Reciprocal Rank Fusion ──
     scores: dict[int, float] = {}
@@ -57,6 +84,10 @@ def hybrid_search(
     for rank, result in enumerate(vec_results):
         vid = result["video_id"]
         scores[vid] = scores.get(vid, 0.0) + vec_weight * (1.0 / (RRF_K + rank + 1))
+
+    # ── Apply filters to search results ──
+    if filter_ids and scores:
+        scores = {vid: score for vid, score in scores.items() if vid in filter_ids}
 
     if not scores:
         return []
@@ -78,11 +109,37 @@ def hybrid_search(
 
 
 
-def keyword_search(query: str, db: Database, limit: int = 10) -> list[dict]:
-    """FTS5-only keyword search."""
-    results = _fts_search(query, db, limit)
+def keyword_search(query: str | None, db: Database, limit: int = 10, filters: dict | None = None) -> list[dict]:
+    """FTS5-only keyword search with optional filters."""
+    # ── Structured filters (if provided) ──
+    filter_ids: set[int] | None = None
+    if filters:
+        filter_ids = set(db.get_filtered_ids(filters, limit=limit * 2))
+
+    # ── Handle filters-only search (no text query) ──
+    if not query:
+        if filter_ids:
+            videos = db.get_videos_by_ids(list(filter_ids)[:limit])
+            for video in videos:
+                video["search_score"] = 1.0
+                video["in_fts"] = False
+                video["in_vec"] = False
+            return videos
+        return []
+
+    # ── FTS5 search ──
+    results = _fts_search(query, db, limit * 2)
     if not results:
         return []
+
+    # Apply filters to FTS results
+    if filter_ids:
+        results = [r for r in results if r["video_id"] in filter_ids]
+        if not results:
+            return []
+
+    # Limit after filtering
+    results = results[:limit]
     video_ids = [r["video_id"] for r in results]
     videos = db.get_videos_by_ids(video_ids)
     for i, video in enumerate(videos):
@@ -92,11 +149,37 @@ def keyword_search(query: str, db: Database, limit: int = 10) -> list[dict]:
     return videos
 
 
-def semantic_search(query: str, db: Database, limit: int = 10) -> list[dict]:
-    """Vector-only semantic search."""
-    results = _vector_search(query, db, limit)
+def semantic_search(query: str | None, db: Database, limit: int = 10, filters: dict | None = None) -> list[dict]:
+    """Vector-only semantic search with optional filters."""
+    # ── Structured filters (if provided) ──
+    filter_ids: set[int] | None = None
+    if filters:
+        filter_ids = set(db.get_filtered_ids(filters, limit=limit * 2))
+
+    # ── Handle filters-only search (no text query) ──
+    if not query:
+        if filter_ids:
+            videos = db.get_videos_by_ids(list(filter_ids)[:limit])
+            for video in videos:
+                video["search_score"] = 1.0
+                video["in_fts"] = False
+                video["in_vec"] = True
+            return videos
+        return []
+
+    # ── Vector search ──
+    results = _vector_search(query, db, limit * 2)
     if not results:
         return []
+
+    # Apply filters to vector results
+    if filter_ids:
+        results = [r for r in results if r["video_id"] in filter_ids]
+        if not results:
+            return []
+
+    # Limit after filtering
+    results = results[:limit]
     video_ids = [r["video_id"] for r in results]
     videos = db.get_videos_by_ids(video_ids)
     for i, video in enumerate(videos):

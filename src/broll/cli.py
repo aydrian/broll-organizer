@@ -331,8 +331,19 @@ def _print_analyzed_samples(videos: list[dict]):
         click.echo()
 
 
+# Resolution name to minimum width mapping
+RESOLUTION_MAP = {
+    "4k": 3840,
+    "4K": 3840,
+    "2160p": 3840,
+    "1080p": 1920,
+    "720p": 1280,
+    "480p": 854,
+}
+
+
 @cli.command()
-@click.argument("query")
+@click.argument("query", required=False)
 @click.option("--drive", required=True, type=click.Path(exists=True, file_okay=False))
 @click.option("--limit", default=10, help="Max results to show")
 @click.option(
@@ -357,8 +368,125 @@ def _print_analyzed_samples(videos: list[dict]):
     is_flag=True,
     help="Embed thumbnails as base64 in HTML gallery (makes file self-contained but larger)"
 )
-def search(query: str, drive: str, limit: int, mode: str, grid: str | None, export_gallery: str | None, gallery_base64: bool):
-    """Search for video clips by description."""
+# Duration filters
+@click.option(
+    "--duration",
+    help="Duration range in seconds (e.g., '5-30', '5:30', or '5..30')"
+)
+@click.option(
+    "--min-duration",
+    type=float,
+    help="Minimum duration in seconds"
+)
+@click.option(
+    "--max-duration",
+    type=float,
+    help="Maximum duration in seconds"
+)
+# Resolution filters
+@click.option(
+    "--resolution",
+    help="Resolution name (4K, 1080p, 720p) or minimum width in pixels"
+)
+@click.option(
+    "--min-width",
+    type=int,
+    help="Minimum video width in pixels"
+)
+@click.option(
+    "--min-height",
+    type=int,
+    help="Minimum video height in pixels"
+)
+# Aspect ratio / orientation filters
+@click.option(
+    "--aspect",
+    help="Aspect ratio (e.g., '16:9', '4:3', '9:16', '1:1')"
+)
+@click.option(
+    "--portrait",
+    is_flag=True,
+    help="Portrait orientation (taller than wide)"
+)
+@click.option(
+    "--landscape",
+    is_flag=True,
+    help="Landscape orientation (wider than tall)"
+)
+# Date filters
+@click.option(
+    "--date",
+    help="Date range (e.g., '2025-01-01:2025-12-31', '2025-01-01..2025-12-31')"
+)
+@click.option(
+    "--since",
+    help="Videos since date (YYYY-MM-DD or ISO 8601)"
+)
+@click.option(
+    "--until",
+    help="Videos until date (YYYY-MM-DD or ISO 8601)"
+)
+# Metadata filters
+@click.option(
+    "--mood",
+    help="Filter by mood (e.g., calm, energetic, mysterious)"
+)
+@click.option(
+    "--movement",
+    help="Filter by camera movement (e.g., static, pan, gimbal)"
+)
+@click.option(
+    "--time",
+    "time_of_day",
+    help="Filter by time of day (e.g., morning, night, golden_hour)"
+)
+@click.option(
+    "--location",
+    help="Filter by location name (partial match)"
+)
+@click.option(
+    "--device",
+    help="Filter by source device (e.g., dji_pocket3, iphone)"
+)
+def search(
+    query: str | None,
+    drive: str,
+    limit: int,
+    mode: str,
+    grid: str | None,
+    export_gallery: str | None,
+    gallery_base64: bool,
+    # Duration
+    duration: str | None,
+    min_duration: float | None,
+    max_duration: float | None,
+    # Resolution
+    resolution: str | None,
+    min_width: int | None,
+    min_height: int | None,
+    # Aspect
+    aspect: str | None,
+    portrait: bool,
+    landscape: bool,
+    # Date
+    date: str | None,
+    since: str | None,
+    until: str | None,
+    # Metadata
+    mood: str | None,
+    movement: str | None,
+    time_of_day: str | None,
+    location: str | None,
+    device: str | None,
+):
+    """Search for video clips by description and/or filters.
+
+    Examples:
+        broll search "sunset" --drive /path/to/drive
+        broll search "beach" --duration 5-30 --resolution 4K
+        broll search --location "Tokyo" --time night --movement static
+        broll search --mood calm --since 2025-01-01
+    """
     from .search import hybrid_search, keyword_search, semantic_search
     from .gallery import generate_contact_sheet, generate_html_gallery, get_grids_dir, parse_grid_size
 
@@ -369,23 +497,159 @@ def search(query: str, drive: str, limit: int, mode: str, grid: str | None, expo
         click.echo("Database not found. Run 'broll init' first.")
         raise SystemExit(1)
 
+    # Build filters dict from CLI options
+    filters: dict[str, Any] = {}
+
+    # Duration filters
+    if duration:
+        # Parse duration range: "5-30", "5:30", "5..30"
+        for sep in ["-", ":", "..", " "]:
+            if sep in duration:
+                parts = duration.split(sep, 1)
+                try:
+                    filters["duration_min"] = float(parts[0].strip())
+                    filters["duration_max"] = float(parts[1].strip())
+                    break
+                except (ValueError, IndexError):
+                    pass
+        else:
+            # Single value - treat as minimum duration
+            try:
+                filters["duration_min"] = float(duration)
+            except ValueError:
+                click.echo(f"Warning: Invalid duration format: {duration}", err=True)
+
+    if min_duration is not None:
+        filters["duration_min"] = min_duration
+    if max_duration is not None:
+        filters["duration_max"] = max_duration
+
+    # Resolution filters
+    if resolution:
+        if resolution in RESOLUTION_MAP:
+            filters["min_width"] = RESOLUTION_MAP[resolution]
+        else:
+            # Try to parse as integer (min width)
+            try:
+                filters["min_width"] = int(resolution)
+            except ValueError:
+                click.echo(f"Warning: Unknown resolution: {resolution}", err=True)
+
+    if min_width is not None:
+        filters["min_width"] = max(filters.get("min_width", 0), min_width)
+    if min_height is not None:
+        filters["min_height"] = min_height
+
+    # Aspect ratio / orientation
+    if aspect:
+        filters["aspect_ratio"] = aspect
+    elif portrait and landscape:
+        click.echo("Warning: Both --portrait and --landscape specified, ignoring orientation", err=True)
+    elif portrait:
+        filters["orientation"] = "portrait"
+    elif landscape:
+        filters["orientation"] = "landscape"
+
+    # Date filters
+    if date:
+        # Parse date range: "2025-01-01:2025-12-31", "2025-01-01..2025-12-31", "2025-01-01--2025-12-31"
+        date_parsed = False
+
+        # Try range separators first (colon or double characters)
+        for sep in [":", "..", "--"]:
+            if sep in date:
+                parts = date.split(sep, 1)
+                if len(parts) == 2:
+                    filters["date_from"] = parts[0].strip()
+                    filters["date_to"] = parts[1].strip()
+                    date_parsed = True
+                    break
+
+        if not date_parsed:
+            # Try " to " or comma
+            for sep in [" to ", ","]:
+                if sep in date:
+                    parts = date.split(sep, 1)
+                    filters["date_from"] = parts[0].strip()
+                    filters["date_to"] = parts[1].strip()
+                    date_parsed = True
+                    break
+
+        if not date_parsed:
+            click.echo(f"Warning: Invalid date format: {date}. Use YYYY-MM-DD:YYYY-MM-DD or YYYY-MM-DD..YYYY-MM-DD", err=True)
+
+    if since:
+        filters["date_from"] = since
+    if until:
+        filters["date_to"] = until
+
+    # Metadata filters
+    if mood:
+        filters["mood"] = mood
+    if movement:
+        filters["movement"] = movement
+    if time_of_day:
+        filters["time_of_day"] = time_of_day
+    if location:
+        filters["location"] = location
+    if device:
+        filters["device"] = device
+
+    # Validate: need at least a query or some filters
+    if not query and not filters:
+        click.echo("Error: Provide a search query or at least one filter option.")
+        click.echo("\nExamples:")
+        click.echo('  broll search "sunset" --drive /path/to/drive')
+        click.echo('  broll search --location "Tokyo" --time night')
+        raise SystemExit(1)
+
     with Database(db_path) as db:
         stats = db.get_catalog_stats()
-        click.echo(f"Searching {stats['total_videos']} videos ({mode} mode)...\n")
 
-        if mode == "keyword":
-            results = keyword_search(query, db, limit)
-        elif mode == "semantic":
-            results = semantic_search(query, db, limit)
-        else:
-            results = hybrid_search(query, db, limit)
+        # Build search description for display
+        search_desc = f'"{query}"' if query else "filtered results"
+        filter_desc = ""
+        if filters:
+            filter_parts = []
+            if "duration_min" in filters or "duration_max" in filters:
+                dur_parts = []
+                if "duration_min" in filters:
+                    dur_parts.append(f">={filters['duration_min']}s")
+                if "duration_max" in filters:
+                    dur_parts.append(f"<={filters['duration_max']}s")
+                filter_parts.append(f"duration: {' '.join(dur_parts)}")
+            if "min_width" in filters:
+                filter_parts.append(f"width>={filters['min_width']}")
+            if "location" in filters:
+                filter_parts.append(f"location:{filters['location']}")
+            if "mood" in filters:
+                filter_parts.append(f"mood:{filters['mood']}")
+            if "time_of_day" in filters:
+                filter_parts.append(f"time:{filters['time_of_day']}")
+            filter_desc = f" ({', '.join(filter_parts)})"
+
+        click.echo(f"Searching {stats['total_videos']} videos ({mode} mode): {search_desc}{filter_desc}\n")
+
+        try:
+            if mode == "keyword":
+                results = keyword_search(query, db, limit, filters=filters if filters else None)
+            elif mode == "semantic":
+                results = semantic_search(query, db, limit, filters=filters if filters else None)
+            else:
+                results = hybrid_search(query, db, limit, filters=filters if filters else None)
+        except Exception as e:
+            click.echo(f"Search error: {e}", err=True)
+            raise SystemExit(1)
 
         if not results:
             click.echo("No results found.")
-            click.echo("\nTips:")
-            click.echo("  - Try broader terms")
-            click.echo("  - Use --mode keyword for exact word matching")
-            click.echo("  - Use --mode semantic for meaning-based search")
+            if query:
+                click.echo("\nTips:")
+                click.echo("  - Try broader terms")
+                click.echo("  - Use --mode keyword for exact word matching")
+                click.echo("  - Use --mode semantic for meaning-based search")
+            if filters:
+                click.echo("\nFilter criteria may be too restrictive. Try removing some filters.")
             return
 
         click.echo(f"Found {len(results)} result(s):\n")
@@ -409,10 +673,18 @@ def search(query: str, drive: str, limit: int, mode: str, grid: str | None, expo
 
                 # Generate filename based on query and timestamp
                 from datetime import datetime
-                safe_query = "".join(c if c.isalnum() else "_" for c in query)[:30]
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                grid_filename = f"grid_{safe_query}_{timestamp}_{cols}x{rows}.jpg"
-                grid_path = grids_dir / grid_filename
+                if query:
+                    safe_query = "".join(c if c.isalnum() else "_" for c in query)[:30]
+                else:
+                    # Use filter description for filename when no query
+                    filter_parts = []
+                    if filters.get("location"):
+                        filter_parts.append(f"loc_{filters['location'][:10]}")
+                    if filters.get("mood"):
+                        filter_parts.append(f"mood_{filters['mood']}")
+                    if filters.get("time_of_day"):
+                        filter_parts.append(f"time_{filters['time_of_day']}")
+                    safe_query = "_".join(filter_parts)[:30] or "filtered"
 
                 click.echo(f"\nGenerating contact sheet ({cols}x{rows})...")
                 generate_contact_sheet(grid_videos, grid_path, grid_size=(cols, rows))
@@ -429,10 +701,11 @@ def search(query: str, drive: str, limit: int, mode: str, grid: str | None, expo
             try:
                 gallery_path = Path(export_gallery)
                 click.echo(f"\nExporting HTML gallery...")
+                gallery_title = f"Search: {query}" if query else "Filtered Results"
                 generate_html_gallery(
                     results,
                     gallery_path,
-                    title=f"Search: {query}",
+                    title=gallery_title,
                     include_base64=gallery_base64
                 )
                 click.echo(f"Saved to: {gallery_path}")

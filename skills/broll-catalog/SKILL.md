@@ -39,6 +39,33 @@ uv sync
 uv run broll search "QUERY" --drive /media/openclaw/Crucial\ X10 --limit 10
 ```
 
+### Search with structured filters (duration, resolution, date, mood, etc.)
+```bash
+# Duration range (5-30 seconds)
+uv run broll search "sunset" --drive /media/openclaw/Crucial\ X10 --duration 5-30
+
+# Minimum resolution (4K, 1080p, 720p, or pixel width)
+uv run broll search "beach" --drive /media/openclaw/Crucial\ X10 --resolution 4K
+
+# Aspect ratio or orientation
+uv run broll search "portrait" --drive /media/openclaw/Crucial\ X10 --aspect 9:16
+uv run broll search "landscape" --drive /media/openclaw/Crucial\ X10 --portrait
+
+# Date range
+uv run broll search "snow" --drive /media/openclaw/Crucial\ X10 --date 2025-12-01..2026-01-15
+uv run broll search "spring" --drive /media/openclaw/Crucial\ X10 --since 2025-03-01 --until 2025-05-31
+
+# Mood and movement filters
+uv run broll search "city" --drive /media/openclaw/Crucial\ X10 --mood calm --movement static
+uv run broll search "night" --drive /media/openclaw/Crucial\ X10 --time golden_hour
+
+# Combined filters
+uv run broll search "temple" --drive /media/openclaw/Crucial\ X10 --duration 5-15 --resolution 4K --mood mysterious
+
+# Filters without keyword (browse all matching filters)
+uv run broll search --drive /media/openclaw/Crucial\ X10 --location "Kusatsu" --time night --movement static
+```
+
 ### Search with contact sheet grid
 ```bash
 uv run broll search "tokyo sunset" --drive /media/openclaw/Crucial\ X10 --grid 3x3
@@ -126,13 +153,39 @@ uv run broll set-location --drive /media/openclaw/Crucial\ X10 --id 42 --lat 35.
 uv run broll web /media/openclaw/Crucial\ X10
 ```
 
+## Structured Search Filters Reference
+
+All filters can be combined with each other and with keyword search. Query is now optional if you provide at least one filter.
+
+| Filter | Option | Example | Description |
+|--------|--------|---------|-------------|
+| **Duration** | `--duration` | `--duration 5-30` | Range in seconds (formats: `5-30`, `5:30`, `5..30`) |
+| | `--min-duration` | `--min-duration 10` | Minimum duration in seconds |
+| | `--max-duration` | `--max-duration 60` | Maximum duration in seconds |
+| **Resolution** | `--resolution` | `--resolution 4K` | Name (`4K`, `1080p`, `720p`) or min pixels |
+| | `--min-width` | `--min-width 1920` | Minimum video width |
+| | `--min-height` | `--min-height 1080` | Minimum video height |
+| **Aspect** | `--aspect` | `--aspect 16:9` | Aspect ratio (`16:9`, `4:3`, `9:16`, `1:1`) |
+| | `--portrait` | `--portrait` | Portrait orientation (height > width) |
+| | `--landscape` | `--landscape` | Landscape orientation (width > height) |
+| **Date** | `--date` | `--date 2025-01-01..2025-12-31` | Date range (`YYYY-MM-DD..YYYY-MM-DD`) |
+| | `--since` | `--since 2025-01-01` | Videos from date onwards |
+| | `--until` | `--until 2025-12-31` | Videos up to date |
+| **Metadata** | `--mood` | `--mood calm` | Mood: `calm`, `energetic`, `mysterious` |
+| | `--movement` | `--movement static` | Camera: `static`, `pan`, `gimbal` |
+| | `--time` | `--time golden_hour` | Time of day: `morning`, `night`, `golden_hour` |
+| | `--location` | `--location "Tokyo"` | Location name (partial match) |
+| | `--device` | `--device dji_pocket3` | Source device filter |
+
 ## Workflow: Finding Clips for Content
 
 1. **Search with keywords:** Use natural language like "onsen steam", "disney castle", "mountain sunset"
-2. **Narrow by location:** Use `--location` flag with place names
-3. **Browse visually:** Launch the web UI with `broll web` for grid view and thumbnails
-4. **Get details:** Use search with `--video-id` for full metadata
-5. **Access files:** Use the `file_path` from results to locate the actual video
+2. **Narrow by filters:** Use `--duration`, `--resolution`, `--mood`, `--time` for precise matches
+3. **Browse by location:** Use `--location` flag with place names (filters are partial match)
+4. **Filters-only browsing:** Omit the query to browse all clips matching filter criteria
+5. **Browse visually:** Launch the web UI with `broll web` for grid view and thumbnails
+6. **Get details:** Use search with `--video-id` for full metadata
+7. **Access files:** Use the `file_path` from results to locate the actual video
 
 ## Workflow: Catalog Maintenance
 

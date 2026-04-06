@@ -1435,3 +1435,164 @@ class Database:
             (video_id,)
         ).fetchall()
         return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Filter query builder for structured search
+    # ------------------------------------------------------------------
+
+    def build_filtered_query(
+        self, filters: dict[str, Any]
+    ) -> tuple[str, list[Any]]:
+        """
+        Build WHERE clause and parameters for structured filters.
+
+        Args:
+            filters: Dict with filter criteria:
+                - duration_min, duration_max: float (seconds)
+                - min_width, min_height: int (pixels)
+                - aspect_ratio: str (e.g., "16:9", "4:3", "9:16")
+                - orientation: str ("portrait", "landscape", "square")
+                - date_from, date_to: str (ISO date strings)
+                - mood: str (exact match)
+                - movement: str (camera_movement exact match)
+                - time_of_day: str (exact match)
+                - location: str (LIKE pattern match on gps_location_name)
+                - device: str (exact match on source_device)
+
+        Returns:
+            Tuple of (WHERE clause string without "WHERE" prefix, list of params)
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        # Duration filters
+        if "duration_min" in filters:
+            conditions.append("duration_seconds >= ?")
+            params.append(filters["duration_min"])
+        if "duration_max" in filters:
+            conditions.append("duration_seconds <= ?")
+            params.append(filters["duration_max"])
+
+        # Resolution filters
+        if "min_width" in filters:
+            conditions.append("width >= ?")
+            params.append(filters["min_width"])
+        if "min_height" in filters:
+            conditions.append("height >= ?")
+            params.append(filters["min_height"])
+
+        # Aspect ratio filter (with 5% tolerance)
+        if "aspect_ratio" in filters:
+            target = filters["aspect_ratio"]
+            # Parse aspect ratio like "16:9" or "4:3"
+            if ":" in target:
+                try:
+                    w, h = target.split(":")
+                    ratio = float(w) / float(h)
+                    # Allow 5% tolerance
+                    tolerance = ratio * 0.05
+                    min_ratio = ratio - tolerance
+                    max_ratio = ratio + tolerance
+                    conditions.append("CAST(width AS REAL) / height BETWEEN ? AND ?")
+                    params.append(min_ratio)
+                    params.append(max_ratio)
+                except (ValueError, ZeroDivisionError):
+                    pass  # Invalid aspect ratio, skip
+
+        # Orientation filter
+        if "orientation" in filters:
+            orient = filters["orientation"]
+            if orient == "portrait":
+                conditions.append("height > width")
+            elif orient == "landscape":
+                conditions.append("width > height")
+            elif orient == "square":
+                conditions.append("width = height")
+
+        # Date range filters
+        if "date_from" in filters:
+            conditions.append("creation_date >= ?")
+            params.append(filters["date_from"])
+        if "date_to" in filters:
+            conditions.append("creation_date <= ?")
+            params.append(filters["date_to"])
+
+        # Metadata filters
+        if "mood" in filters:
+            conditions.append("mood = ?")
+            params.append(filters["mood"])
+        if "movement" in filters:
+            conditions.append("camera_movement = ?")
+            params.append(filters["movement"])
+        if "time_of_day" in filters:
+            conditions.append("time_of_day = ?")
+            params.append(filters["time_of_day"])
+
+        # Location filter (LIKE pattern)
+        if "location" in filters:
+            conditions.append("gps_location_name LIKE ?")
+            params.append(f"%{filters['location']}%")
+
+        # Device filter
+        if "device" in filters:
+            conditions.append("source_device = ?")
+            params.append(filters["device"])
+
+        if conditions:
+            return " AND ".join(conditions), params
+        else:
+            return "1=1", []  # No filters, match all
+
+    def get_filtered_ids(
+        self, filters: dict[str, Any], limit: int = 1000
+    ) -> list[int]:
+        """
+        Get video IDs matching the structured filters.
+
+        Args:
+            filters: Dict with filter criteria (see build_filtered_query)
+            limit: Maximum number of IDs to return
+
+        Returns:
+            List of video IDs matching all filters
+        """
+        where_clause, params = self.build_filtered_query(filters)
+        conn = self.connect()
+
+        sql = f"""
+            SELECT id FROM videos
+            WHERE {where_clause}
+            ORDER BY creation_date DESC
+            LIMIT ?
+        """
+        rows = conn.execute(sql, (*params, limit)).fetchall()
+        return [row[0] for row in rows]
+
+    def get_videos_by_filters(
+        self, filters: dict[str, Any], limit: int = 100, offset: int = 0
+    ) -> list[dict]:
+        """
+        Fetch full video records matching the structured filters.
+
+        Args:
+            filters: Dict with filter criteria (see build_filtered_query)
+            limit: Maximum number of results
+            offset: Offset for pagination
+
+        Returns:
+            List of video dicts matching all filters
+        """
+        where_clause, params = self.build_filtered_query(filters)
+        conn = self.connect()
+
+        sql = f"""
+            SELECT * FROM videos
+            WHERE {where_clause}
+            ORDER BY creation_date DESC
+            LIMIT ? OFFSET ?
+        """
+        rows = conn.execute(sql, (*params, limit, offset)).fetchall()
+        columns = [
+            desc[0] for desc in conn.execute("SELECT * FROM videos LIMIT 0").description
+        ]
+        return [dict(zip(columns, row)) for row in rows]
