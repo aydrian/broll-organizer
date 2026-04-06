@@ -1,0 +1,522 @@
+{% extends "base.html" %}
+{% block title %}Stats - B-Roll Catalog{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="stats-header">
+    <h1>Stats Dashboard</h1>
+    <button id="export-stats" class="btn export-btn" aria-label="Export stats as JSON">
+        <span aria-hidden="true">📥</span> Export
+    </button>
+</div>
+
+<div class="stats-loading" id="stats-loading">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Loading statistics...</p>
+</div>
+
+<div class="stats-container" id="stats-container" style="display: none;">
+    <!-- Overview Cards -->
+    <section class="stats-section overview-section" aria-label="Overview statistics">
+        <h2>Overview</h2>
+        <div class="stat-cards">
+            <div class="stat-card">
+                <div class="stat-value" id="total-clips">--</div>
+                <div class="stat-label">clips</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="total-storage">--</div>
+                <div class="stat-label">storage</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="total-locations">--</div>
+                <div class="stat-label">locations</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="analyzed-count">--</div>
+                <div class="stat-label">analyzed</div>
+            </div>
+        </div>
+    </section>
+
+    <div class="stats-grid">
+        <!-- Storage by Location -->
+        <section class="stats-section" aria-label="Storage by location">
+            <h2>Storage by Location</h2>
+            <div class="chart-container">
+                <canvas id="locationChart"></canvas>
+            </div>
+            <div class="location-list" id="location-list"></div>
+        </section>
+
+        <!-- Timeline/Activity -->
+        <section class="stats-section" aria-label="Clips over time">
+            <h2>
+                Clips Over Time
+                <select id="year-filter" class="year-select" aria-label="Select year">
+                    <option value="">All Years</option>
+                </select>
+            </h2>
+            <div class="chart-container">
+                <canvas id="timelineChart"></canvas>
+            </div>
+        </section>
+    </div>
+
+    <div class="stats-grid">
+        <!-- Top Tags -->
+        <section class="stats-section" aria-label="Top tags">
+            <h2>Top Tags</h2>
+            <div class="tags-chart" id="tags-chart"></div>
+        </section>
+
+        <!-- Device Breakdown -->
+        <section class="stats-section" aria-label="Device breakdown">
+            <h2>Devices</h2>
+            <div class="chart-container pie-chart-container">
+                <canvas id="deviceChart"></canvas>
+            </div>
+        </section>
+    </div>
+
+    <div class="stats-grid">
+        <!-- Resolution Distribution -->
+        <section class="stats-section" aria-label="Resolution distribution">
+            <h2>Resolutions</h2>
+            <div class="resolution-chart" id="resolution-chart"></div>
+        </section>
+
+        <!-- Recent Activity -->
+        <section class="stats-section" aria-label="Recent activity">
+            <h2>Recently Processed</h2>
+            <div class="recent-list" id="recent-list"></div>
+        </section>
+    </div>
+
+    <!-- Health Check -->
+    <section class="stats-section health-section" aria-label="Catalog health">
+        <h2>Health Check</h2>
+        <div class="health-status" id="health-status">
+            <div class="health-item">
+                <span class="health-icon" aria-hidden="true">✓</span>
+                <span class="health-text">Database connected</span>
+            </div>
+            <div class="health-item" id="thumbnail-health">
+                <span class="health-icon" aria-hidden="true">...</span>
+                <span class="health-text">Checking thumbnails...</span>
+            </div>
+            <div class="health-item" id="analysis-health">
+                <span class="health-icon" aria-hidden="true">...</span>
+                <span class="health-text">Checking analysis status...</span>
+            </div>
+        </div>
+        <button id="run-doctor" class="btn secondary doctor-btn" aria-label="Run full diagnostic">
+            Run full diagnostic
+        </button>
+    </section>
+</div>
+
+<div class="stats-error" id="stats-error" style="display: none;">
+    <p>Failed to load statistics. Please try again later.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Global chart instances
+let locationChart, timelineChart, deviceChart;
+let statsData = {};
+
+// Format bytes to human readable
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 MB';
+    const gb = bytes / (1024 ** 3);
+    if (gb >= 1) return gb.toFixed(1) + ' GB';
+    const mb = bytes / (1024 ** 2);
+    return Math.round(mb) + ' MB';
+}
+
+// Format duration
+function formatDuration(seconds) {
+    if (!seconds) return '--:--';
+    const total = Math.round(seconds);
+    const hrs = Math.floor(total / 3600);
+    const mins = Math.floor((total % 3600) / 60);
+    if (hrs > 0) return `${hrs}h ${mins}m`;
+    return `${mins}m`;
+}
+
+// Load all stats data
+async function loadStats() {
+    try {
+        const loadingEl = document.getElementById('stats-loading');
+        const containerEl = document.getElementById('stats-container');
+        const errorEl = document.getElementById('stats-error');
+
+        // Fetch all stats in parallel
+        const [overview, byLocation, timeline, tags, devices, resolutions, recent] = await Promise.all([
+            fetch('/api/stats/overview').then(r => r.json()),
+            fetch('/api/stats/by-location').then(r => r.json()),
+            fetch('/api/stats/timeline').then(r => r.json()),
+            fetch('/api/stats/tags').then(r => r.json()),
+            fetch('/api/stats/devices').then(r => r.json()),
+            fetch('/api/stats/resolutions').then(r => r.json()),
+            fetch('/api/stats/recent').then(r => r.json())
+        ]);
+
+        statsData = { overview, byLocation, timeline, tags, devices, resolutions, recent };
+
+        // Hide loading, show container
+        loadingEl.style.display = 'none';
+        containerEl.style.display = 'block';
+
+        // Render all sections
+        renderOverview(overview);
+        renderLocationChart(byLocation);
+        renderTimelineChart(timeline);
+        renderTagsChart(tags);
+        renderDeviceChart(devices);
+        renderResolutions(resolutions);
+        renderRecent(recent);
+        renderHealth(overview);
+        setupYearFilter(timeline);
+
+    } catch (error) {
+        console.error('Error loading stats:', error);
+        document.getElementById('stats-loading').style.display = 'none';
+        document.getElementById('stats-error').style.display = 'block';
+    }
+}
+
+// Render overview cards
+function renderOverview(data) {
+    document.getElementById('total-clips').textContent = data.total_clips?.toLocaleString() || '0';
+    document.getElementById('total-storage').textContent = formatBytes(data.total_size_bytes);
+    document.getElementById('total-locations').textContent = data.locations_count || '0';
+    document.getElementById('analyzed-count').textContent = data.analyzed_count?.toLocaleString() || '0';
+}
+
+// Render location bar chart
+function renderLocationChart(data) {
+    const ctx = document.getElementById('locationChart').getContext('2d');
+    const locations = data.locations || [];
+
+    const labels = locations.map(l => l.location);
+    const values = locations.map(l => l.size_bytes / (1024 ** 3)); // Convert to GB
+
+    locationChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Storage (GB)',
+                data: values,
+                backgroundColor: '#3b82f6',
+                borderColor: '#2563eb',
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const idx = context.dataIndex;
+                            const loc = locations[idx];
+                            return [
+                                `Storage: ${formatBytes(loc.size_bytes)}`,
+                                `Clips: ${loc.clips}`,
+                                `${loc.percentage}% of total`
+                            ];
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: '#2a2a2a' },
+                    ticks: { color: '#a0a0a0' }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#a0a0a0' }
+                }
+            }
+        }
+    });
+}
+
+// Render timeline chart
+function renderTimelineChart(data) {
+    const ctx = document.getElementById('timelineChart').getContext('2d');
+    const months = data.months || [];
+
+    const labels = months.map(m => {
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return monthNames[parseInt(m.month) - 1];
+    });
+    const values = months.map(m => m.clips);
+
+    timelineChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Clips',
+                data: values,
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 4,
+                pointBackgroundColor: '#3b82f6'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: '#2a2a2a' },
+                    ticks: { color: '#a0a0a0' }
+                },
+                x: {
+                    grid: { color: '#2a2a2a' },
+                    ticks: { color: '#a0a0a0' }
+                }
+            }
+        }
+    });
+}
+
+// Setup year filter
+function setupYearFilter(data) {
+    const select = document.getElementById('year-filter');
+    const years = data.available_years || [];
+
+    // Clear existing options
+    select.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+
+    // Select current year
+    if (data.year) {
+        select.value = data.year;
+    }
+
+    // Add change handler
+    select.addEventListener('change', async (e) => {
+        const year = e.target.value;
+        const response = await fetch(`/api/stats/timeline?year=${year}`);
+        const newData = await response.json();
+
+        // Update chart
+        const months = newData.months || [];
+        timelineChart.data.labels = months.map(m => {
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            return monthNames[parseInt(m.month) - 1];
+        });
+        timelineChart.data.datasets[0].data = months.map(m => m.clips);
+        timelineChart.update();
+    });
+}
+
+// Render tags as horizontal bars (CSS-based)
+function renderTagsChart(data) {
+    const container = document.getElementById('tags-chart');
+    const tags = data.tags || [];
+
+    if (tags.length === 0) {
+        container.innerHTML = '<p class="text-muted">No tags found</p>';
+        return;
+    }
+
+    const maxCount = Math.max(...tags.map(t => t.count));
+
+    container.innerHTML = tags.map(tag => {
+        const percentage = (tag.count / maxCount * 100).toFixed(1);
+        return `
+            <div class="tag-bar">
+                <div class="tag-bar-label">${escapeHtml(tag.tag)} (${tag.count})</div>
+                <div class="tag-bar-track">
+                    <div class="tag-bar-fill" style="width: ${percentage}%"></div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Render device pie chart
+function renderDeviceChart(data) {
+    const ctx = document.getElementById('deviceChart').getContext('2d');
+    const devices = data.devices || [];
+
+    if (devices.length === 0) {
+        // Show empty state
+        document.getElementById('deviceChart').parentElement.innerHTML =
+            '<p class="text-muted">No device data found</p>';
+        return;
+    }
+
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+    deviceChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: devices.map(d => d.device),
+            datasets: [{
+                data: devices.map(d => d.count),
+                backgroundColor: colors,
+                borderWidth: 0,
+                hoverOffset: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        color: '#a0a0a0',
+                        padding: 15
+                    }
+                }
+            },
+            cutout: '60%'
+        }
+    });
+}
+
+// Render resolutions
+function renderResolutions(data) {
+    const container = document.getElementById('resolution-chart');
+    const resolutions = data.resolutions || [];
+
+    if (resolutions.length === 0) {
+        container.innerHTML = '<p class="text-muted">No resolution data found</p>';
+        return;
+    }
+
+    const maxCount = Math.max(...resolutions.map(r => r.count));
+
+    container.innerHTML = resolutions.map(res => {
+        const percentage = (res.count / maxCount * 100).toFixed(1);
+        const resLabel = res.resolution === 'Unknown' ? 'Unknown' : res.resolution;
+        return `
+            <div class="resolution-bar">
+                <div class="resolution-label">${escapeHtml(resLabel)} (${res.count})</div>
+                <div class="resolution-track">
+                    <div class="resolution-fill" style="width: ${percentage}%"></div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Render recent activity
+function renderRecent(data) {
+    const container = document.getElementById('recent-list');
+    const videos = data.videos || [];
+
+    if (videos.length === 0) {
+        container.innerHTML = '<p class="text-muted">No recent activity</p>';
+        return;
+    }
+
+    container.innerHTML = videos.map(video => {
+        const date = video.processed_at ? new Date(video.processed_at).toLocaleDateString() : 'Unknown';
+        const thumb = video.thumbnail_path ?
+            `<img src="/thumbnail/${video.file_hash || video.id}" alt="" class="recent-thumb" loading="lazy">` :
+            `<div class="recent-thumb placeholder">🎬</div>`;
+
+        return `
+            <div class="recent-item">
+                ${thumb}
+                <div class="recent-info">
+                    <div class="recent-name">${escapeHtml(video.file_name || 'Unknown')}</div>
+                    <div class="recent-meta">
+                        ${formatDuration(video.duration_seconds)} • ${date}
+                        ${video.gps_location_name ? '• ' + escapeHtml(video.gps_location_name) : ''}
+                    </div>
+                    ${video.scene_description ?
+                        `<div class="recent-desc">${escapeHtml(video.scene_description.substring(0, 60))}...</div>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Render health status
+function renderHealth(data) {
+    const health = data.health || {};
+
+    // Thumbnails
+    const thumbHealth = document.getElementById('thumbnail-health');
+    if (health.missing_thumbnails === 0) {
+        thumbHealth.innerHTML = `<span class="health-icon success" aria-hidden="true">✓</span><span class="health-text">All thumbnails ready (${data.thumbnail_count || 0} generated)</span>`;
+    } else {
+        thumbHealth.innerHTML = `<span class="health-icon warning" aria-hidden="true">⚠</span><span class="health-text">${health.missing_thumbnails} clips missing thumbnails</span>`;
+    }
+
+    // Analysis
+    const analysisHealth = document.getElementById('analysis-health');
+    if (health.pending_analysis === 0) {
+        analysisHealth.innerHTML = `<span class="health-icon success" aria-hidden="true">✓</span><span class="health-text">All clips analyzed</span>`;
+    } else {
+        analysisHealth.innerHTML = `<span class="health-icon warning" aria-hidden="true">⚠</span><span class="health-text">${health.pending_analysis} clips need analysis</span>`;
+    }
+}
+
+// Escape HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Export stats
+function setupExport() {
+    document.getElementById('export-stats').addEventListener('click', () => {
+        const dataStr = JSON.stringify(statsData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `broll-stats-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        URL.revokeObjectURL(url);
+    });
+}
+
+// Run doctor button
+function setupDoctor() {
+    document.getElementById('run-doctor').addEventListener('click', () => {
+        alert('Run: broll doctor (CLI command to perform full diagnostic)');
+    });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    setupExport();
+    setupDoctor();
+});
+</script>
+{% endblock %}

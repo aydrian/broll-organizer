@@ -1233,6 +1233,326 @@ def create_app(drive_path: str) -> Flask:
         return jsonify(get_stats())
 
     # ═════════════════════════════════════════════════════════════════
+    # Stats Dashboard API
+    # ═════════════════════════════════════════════════════════════════
+
+    @app.route("/stats")
+    def stats_page():
+        """Render the stats dashboard page."""
+        return render_template("stats.html")
+
+    @app.route("/api/stats/overview")
+    def api_stats_overview():
+        """Get overview statistics for the catalog."""
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+
+        try:
+            cursor = conn.cursor()
+
+            # Basic counts
+            cursor.execute("""
+                SELECT
+                    COUNT(*) as total_clips,
+                    SUM(file_size) as total_size,
+                    COUNT(DISTINCT folder_location) as locations_count,
+                    COUNT(CASE WHEN scene_description IS NOT NULL AND scene_description != '' THEN 1 END) as analyzed_count,
+                    COUNT(CASE WHEN thumbnail_path IS NOT NULL THEN 1 END) as thumbnail_count,
+                    SUM(duration_seconds) as total_duration
+                FROM videos
+            """)
+            row = cursor.fetchone()
+
+            # Health check info
+            cursor.execute("SELECT COUNT(*) FROM videos WHERE scene_description IS NULL OR scene_description = ''")
+            pending_analysis = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM videos WHERE thumbnail_path IS NULL")
+            missing_thumbnails = cursor.fetchone()[0]
+
+            return jsonify({
+                "total_clips": row["total_clips"] or 0,
+                "total_size_bytes": row["total_size"] or 0,
+                "total_duration_seconds": row["total_duration"] or 0,
+                "locations_count": row["locations_count"] or 0,
+                "analyzed_count": row["analyzed_count"] or 0,
+                "thumbnail_count": row["thumbnail_count"] or 0,
+                "health": {
+                    "pending_analysis": pending_analysis,
+                    "missing_thumbnails": missing_thumbnails,
+                    "database_connected": True
+                }
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching stats overview: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/stats/by-location")
+    def api_stats_by_location():
+        """Get video counts and storage by location."""
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+
+        try:
+            cursor = conn.cursor()
+
+            # Get all videos with file paths and calculate folder from path
+            cursor.execute("""
+                SELECT
+                    file_path,
+                    file_size
+                FROM videos
+            """)
+
+            from collections import defaultdict
+            location_data = defaultdict(lambda: {"clips": 0, "size_bytes": 0})
+
+            for row in cursor.fetchall():
+                file_path = row["file_path"]
+                size = row["file_size"] or 0
+
+                # Extract top-level folder from file_path
+                if "/" in file_path:
+                    folder = file_path.split("/")[0]
+                elif "\\" in file_path:
+                    folder = file_path.split("\\")[0]
+                else:
+                    folder = "Root"
+
+                location_data[folder]["clips"] += 1
+                location_data[folder]["size_bytes"] += size
+
+            # Convert to list and calculate percentages
+            locations = []
+            total_size = 0
+            for folder, data in location_data.items():
+                total_size += data["size_bytes"]
+                locations.append({
+                    "location": folder,
+                    "clips": data["clips"],
+                    "size_bytes": data["size_bytes"]
+                })
+
+            # Sort by size descending
+            locations.sort(key=lambda x: x["size_bytes"], reverse=True)
+
+            # Calculate percentages
+            for loc in locations:
+                loc["percentage"] = round((loc["size_bytes"] / total_size * 100), 1) if total_size > 0 else 0
+
+            return jsonify({
+                "locations": locations,
+                "total_size_bytes": total_size
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching stats by location: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/stats/timeline")
+    def api_stats_timeline():
+        """Get video counts by month for a specific year."""
+        year = request.args.get("year", "").strip()
+
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+
+        try:
+            cursor = conn.cursor()
+
+            # Get available years
+            cursor.execute("""
+                SELECT DISTINCT strftime('%Y', creation_date) as year
+                FROM videos
+                WHERE creation_date IS NOT NULL
+                ORDER BY year DESC
+            """)
+            available_years = [row["year"] for row in cursor.fetchall()]
+
+            # Default to most recent year if not specified
+            if not year and available_years:
+                year = available_years[0]
+
+            if not year:
+                return jsonify({
+                    "year": None,
+                    "months": [],
+                    "available_years": [],
+                    "total": 0
+                })
+
+            cursor.execute("""
+                SELECT
+                    strftime('%m', creation_date) as month,
+                    COUNT(*) as clips
+                FROM videos
+                WHERE strftime('%Y', creation_date) = ?
+                GROUP BY month
+                ORDER BY month
+            """, (year,))
+
+            # Initialize all 12 months with 0
+            months = {str(i).zfill(2): 0 for i in range(1, 13)}
+
+            for row in cursor.fetchall():
+                months[row["month"]] = row["clips"]
+
+            return jsonify({
+                "year": year,
+                "months": [{"month": k, "clips": v} for k, v in sorted(months.items())],
+                "available_years": available_years,
+                "total": sum(months.values())
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching stats timeline: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/stats/tags")
+    def api_stats_tags():
+        """Get most popular tags."""
+        limit = request.args.get("limit", 20, type=int)
+
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+
+        try:
+            cursor = conn.cursor()
+
+            # Get all tags
+            cursor.execute("SELECT tags FROM videos WHERE tags IS NOT NULL AND tags != ''")
+
+            tag_counts = {}
+            for row in cursor.fetchall():
+                tags_str = row["tags"]
+                if not tags_str:
+                    continue
+
+                # Try to parse as JSON
+                try:
+                    tags = json.loads(tags_str)
+                    if isinstance(tags, list):
+                        for tag in tags:
+                            tag = tag.strip().lower()
+                            if tag:
+                                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+                    elif isinstance(tags, str):
+                        # Comma-separated or single tag
+                        for tag in tags.split(","):
+                            tag = tag.strip().lower()
+                            if tag:
+                                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+                except json.JSONDecodeError:
+                    # Not JSON, treat as comma-separated
+                    for tag in tags_str.split(","):
+                        tag = tag.strip().lower()
+                        if tag:
+                            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+            # Sort by count and take top N
+            sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+
+            return jsonify({
+                "tags": [{"tag": tag, "count": count} for tag, count in sorted_tags]
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching stats tags: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/stats/devices")
+    def api_stats_devices():
+        """Get video counts by source device."""
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+
+        try:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT
+                    COALESCE(source_device, 'Unknown') as device,
+                    COUNT(*) as count
+                FROM videos
+                GROUP BY source_device
+                ORDER BY count DESC
+            """)
+
+            devices = []
+            for row in cursor.fetchall():
+                devices.append({
+                    "device": row["device"],
+                    "count": row["count"]
+                })
+
+            return jsonify({"devices": devices})
+        except Exception as e:
+            current_app.logger.error(f"Error fetching stats devices: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/stats/resolutions")
+    def api_stats_resolutions():
+        """Get video counts by resolution."""
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+
+        try:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT
+                    COALESCE(resolution, 'Unknown') as resolution,
+                    COUNT(*) as count
+                FROM videos
+                GROUP BY resolution
+                ORDER BY count DESC
+            """)
+
+            resolutions = []
+            for row in cursor.fetchall():
+                resolutions.append({
+                    "resolution": row["resolution"],
+                    "count": row["count"]
+                })
+
+            return jsonify({"resolutions": resolutions})
+        except Exception as e:
+            current_app.logger.error(f"Error fetching stats resolutions: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/stats/recent")
+    def api_stats_recent():
+        """Get recently processed clips."""
+        limit = request.args.get("limit", 10, type=int)
+
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+
+        try:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT
+                    id,
+                    file_name,
+                    file_path,
+                    duration_seconds,
+                    resolution,
+                    thumbnail_path,
+                    scene_description,
+                    gps_location_name,
+                    processed_at
+                FROM videos
+                WHERE processed_at IS NOT NULL
+                ORDER BY processed_at DESC
+                LIMIT ?
+            """, (limit,))
+
+            videos = [dict(row) for row in cursor.fetchall()]
+
+            return jsonify({"videos": videos})
+        except Exception as e:
+            current_app.logger.error(f"Error fetching recent videos: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    # ═════════════════════════════════════════════════════════════════
     # Clip Export API
     # ═════════════════════════════════════════════════════════════════
 
