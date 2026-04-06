@@ -15,11 +15,8 @@
         <div class="nav-links">
             <a href="/" class="{% if request.endpoint == 'browse' %}active{% endif %}" aria-current="{% if request.endpoint == 'browse' %}page{% endif %}">Browse</a>
             <a href="/search" class="{% if request.endpoint == 'search_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'search_page' %}page{% endif %}">Search</a>
+            <a href="/timeline" class="{% if request.endpoint == 'timeline_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'timeline_page' %}page{% endif %}">Timeline</a>
             <a href="/map" class="{% if request.endpoint == 'map_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'map_page' %}page{% endif %}">Map</a>
-        </div>
-        <div class="nav-status">
-            <span id="connection-status" class="connection-status online" title="Drive connected">[● Online]</span>
-
         </div>
         <div class="nav-status">
             <span id="connection-status" class="connection-status online" title="Drive connected">[● Online]</span>
@@ -40,6 +37,10 @@
             <a href="/playlists" class="bottom-nav-item {% if request.endpoint == 'playlists' %}active{% endif %}" aria-label="Playlists">
                 <span class="bottom-nav-icon" aria-hidden="true">📋</span>
                 <span class="bottom-nav-label">Lists</span>
+            </a>
+            <a href="/timeline" class="bottom-nav-item {% if request.endpoint == 'timeline_page' %}active{% endif %}" aria-label="Timeline view">
+                <span class="bottom-nav-icon" aria-hidden="true">📅</span>
+                <span class="bottom-nav-label">Timeline</span>
             </a>
             <a href="/map" class="bottom-nav-item {% if request.endpoint == 'map_page' %}active{% endif %}" aria-label="Map view">
                 <span class="bottom-nav-icon" aria-hidden="true">🗺️</span>

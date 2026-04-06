@@ -627,6 +627,16 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
     background: var(--bg-hover);
 }
 
+.folder-card.selected {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: white;
+}
+
+.folder-card.selected .folder-name {
+    color: white;
+}
+
 .folder-icon {
     font-size: 2.5rem;
     margin-bottom: 0.75rem;
@@ -714,6 +724,46 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
     border-color: var(--accent);
     transform: translateY(-2px);
     color: var(--text);
+}
+
+.video-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent);
+}
+
+/* Hover video preview */
+.hover-preview {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 2;
+}
+
+.hover-hint {
+    position: absolute;
+    bottom: 6px;
+    left: 6px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 3;
+}
+
+.video-card:hover .hover-hint {
+    opacity: 1;
+}
+
+.card-thumb img {
+    transition: opacity 0.2s;
 }
 
 .card-thumb {
@@ -2376,3 +2426,551 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
 
 /* ═════════════════════════════════════════════════════════════════
 
+/* ═════════════════════════════════════════════════════════════════
+   PLAYLIST PICKER MODAL
+═════════════════════════════════════════════════════════════════ */
+
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.modal.show {
+    display: flex;
+}
+
+.modal-content {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    max-width: 400px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.modal-content h3 {
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+}
+
+.playlist-options {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+}
+
+.playlist-option {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.playlist-option:hover {
+    background: var(--bg-hover);
+}
+
+.playlist-option.selected {
+    background: var(--accent);
+    color: white;
+}
+
+.playlist-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.playlist-name {
+    flex: 1;
+    font-size: 0.95rem;
+}
+
+.playlist-count {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.playlist-option.selected .playlist-count {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.modal-divider {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin: 1rem 0;
+    position: relative;
+}
+
+.modal-divider::before,
+.modal-divider::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 35%;
+    height: 1px;
+    background: var(--border);
+}
+
+.modal-divider::before { left: 0; }
+.modal-divider::after { right: 0; }
+
+.modal-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-input);
+    color: var(--text);
+    font-size: 0.95rem;
+    margin-bottom: 1rem;
+}
+
+.modal-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+}
+
+.modal-actions .btn {
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius);
+    border: none;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+}
+
+.modal-actions .btn.secondary {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+
+.modal-actions .btn.secondary:hover {
+    background: var(--border);
+}
+
+.modal-actions .btn:not(.secondary) {
+    background: var(--accent);
+    color: white;
+}
+
+.modal-actions .btn:not(.secondary):hover {
+    background: var(--accent-hover);
+}
+
+.text-muted {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 1rem;
+}
+
+/* Location Picker Styles */
+.location-results {
+    max-height: 150px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+}
+
+.location-result {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.2s;
+    border: 1px solid var(--border);
+}
+
+.location-result:hover {
+    background: var(--bg-hover);
+}
+
+.location-result.selected {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+.location-name {
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+.location-coords {
+    font-size: 0.8rem;
+    opacity: 0.8;
+}
+
+.modal-input-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   TIMELINE VIEW STYLES
+═════════════════════════════════════════════════════════════════ */
+
+.timeline-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1.5rem;
+}
+
+.timeline-header {
+    margin-bottom: 2rem;
+}
+
+.timeline-header h1 {
+    font-size: 1.75rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.timeline-subtitle {
+    color: var(--text-muted);
+    font-size: 1rem;
+}
+
+.timeline-breadcrumbs {
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+}
+
+.timeline-breadcrumbs a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.timeline-breadcrumbs a:hover {
+    text-decoration: underline;
+}
+
+.breadcrumb-separator {
+    color: var(--text-muted);
+    margin: 0 0.5rem;
+}
+
+.breadcrumb-current {
+    color: var(--text);
+    font-weight: 500;
+}
+
+/* Years Grid */
+.years-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.year-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    text-decoration: none;
+    color: var(--text);
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+
+.year-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+}
+
+.year-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.year-number {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.year-count {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    background: var(--bg-hover);
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+}
+
+.year-card-stats {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+.year-bar {
+    height: 4px;
+    background: var(--bg-hover);
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+}
+
+.year-bar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: var(--fill, 0%);
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+}
+
+/* Year View */
+.year-view {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+}
+
+.year-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.year-title {
+    font-size: 1.5rem;
+    margin: 0;
+}
+
+.year-stats {
+    display: flex;
+    gap: 1.5rem;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.stat {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.stat-value {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* Activity Heatmap */
+.activity-heatmap {
+    margin-bottom: 2rem;
+    padding: 1rem;
+    background: var(--bg);
+    border-radius: var(--radius);
+}
+
+.heatmap-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.heatmap-months {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    padding-left: 28px;
+}
+
+.heatmap-months span {
+    flex: 1;
+    text-align: center;
+}
+
+.heatmap-cells {
+    display: grid;
+    grid-template-columns: repeat(53, 1fr);
+    gap: 3px;
+}
+
+.heatmap-cell {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--bg-hover);
+    transition: background 0.2s;
+}
+
+.heatmap-cell.empty {
+    background: transparent;
+}
+
+.heatmap-cell.level-1 { background: #0e4429; }
+.heatmap-cell.level-2 { background: #006d32; }
+.heatmap-cell.level-3 { background: #26a641; }
+.heatmap-cell.level-4 { background: #39d353; }
+
+/* Months Grid */
+.months-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+}
+
+.month-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    text-decoration: none;
+    color: var(--text);
+    transition: all 0.2s;
+}
+
+.month-card:hover {
+    border-color: var(--accent);
+}
+
+.month-card.empty {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.month-card.empty:hover {
+    border-color: var(--border);
+}
+
+.month-name {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.month-count {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.month-bar {
+    height: 3px;
+    background: var(--bg-hover);
+    border-radius: 2px;
+    margin-top: 0.75rem;
+    overflow: hidden;
+}
+
+.month-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+}
+
+/* Day View */
+.day-view {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+}
+
+.day-header {
+    margin-bottom: 1.5rem;
+}
+
+.day-date {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.day-count {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+/* Empty State */
+.timeline-loading,
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-muted);
+}
+
+.empty-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.empty-state h3 {
+    margin-bottom: 0.5rem;
+    color: var(--text);
+}
+
+/* Mobile Adjustments */
+@media (max-width: 768px) {
+    .timeline-container {
+        padding: 1rem;
+    }
+    
+    .months-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .heatmap-cells {
+        grid-template-columns: repeat(53, 1fr);
+        gap: 2px;
+    }
+    
+    .heatmap-cell {
+        width: 6px;
+        height: 6px;
+    }
+    
+    .year-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+@media (max-width: 480px) {
+    .months-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .years-grid {
+        grid-template-columns: 1fr;
+    }
+}

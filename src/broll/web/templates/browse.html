@@ -31,17 +31,60 @@
     <div id="loader" class="loader" role="status" aria-live="polite">Loading...</div>
     <div id="sentinel" class="sentinel" aria-hidden="true"></div>
     
-    <!-- Multi-select toolbar for mobile -->
-    <div class="multi-select-toolbar" id="multi-select-toolbar" role="toolbar" aria-label="Selection actions">
-        <span class="multi-select-count" id="selected-count">0 selected</span>
+    <!-- Multi-select toolbar -->
+    <div class="multi-select-toolbar" id="batch-toolbar" role="toolbar" aria-label="Selection actions">
+        <span class="multi-select-count" id="selection-count">0 selected</span>
         <div class="multi-select-actions">
+            <button type="button" class="multi-select-btn" id="select-all-btn" aria-label="Select all">
+                Select All
+            </button>
+            <button type="button" class="multi-select-btn secondary" id="deselect-all-btn" aria-label="Deselect all">
+                Deselect
+            </button>
             <button type="button" class="multi-select-btn secondary" id="cancel-selection" aria-label="Cancel selection">
                 Cancel
+            </button>
+            <button type="button" class="multi-select-btn" id="set-location-btn" aria-label="Set location for selected">
+                📍 Location
             </button>
             <button type="button" class="multi-select-btn" id="add-to-playlist" aria-label="Add selected to playlist">
                 <span aria-hidden="true">+</span> Playlist
             </button>
-
+        </div>
+    </div>
+    
+    <!-- Playlist Picker Modal -->
+    <div class="modal" id="playlist-picker-modal" role="dialog" aria-modal="true" aria-label="Add to playlist">
+        <div class="modal-content">
+            <h3>Add to Playlist</h3>
+            <div id="playlist-options" class="playlist-options">
+                <p class="text-muted">Loading playlists...</p>
+            </div>
+            <div class="modal-divider">or create new</div>
+            <input type="text" id="new-playlist-name" class="modal-input" placeholder="New playlist name...">
+            <div class="modal-actions">
+                <button type="button" class="btn secondary" id="cancel-playlist-picker">Cancel</button>
+                <button type="button" class="btn" id="confirm-add-to-playlist">Add</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Location Picker Modal -->
+    <div class="modal" id="location-picker-modal" role="dialog" aria-modal="true" aria-label="Set location">
+        <div class="modal-content">
+            <h3>Set Location</h3>
+            <input type="text" id="location-search" class="modal-input" placeholder="Search for a place...">
+            <div id="location-results" class="location-results"></div>
+            <div class="modal-divider">or enter manually</div>
+            <div class="modal-input-row">
+                <input type="text" id="location-lat" class="modal-input" placeholder="Latitude" style="flex:1">
+                <input type="text" id="location-lon" class="modal-input" placeholder="Longitude" style="flex:1">
+            </div>
+            <input type="text" id="location-name" class="modal-input" placeholder="Location name (e.g., Tokyo Station)">
+            <div class="modal-actions">
+                <button type="button" class="btn secondary" id="cancel-location-picker">Cancel</button>
+                <button type="button" class="btn" id="confirm-set-location">Set Location</button>
+            </div>
         </div>
     </div>
 {% endblock %}

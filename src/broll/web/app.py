@@ -286,6 +286,277 @@ def create_app(drive_path: str) -> Flask:
 
     # ── Routes ──
 
+    @app.route("/timeline")
+    def timeline_page():
+        """Timeline/calendar view for browsing videos chronologically."""
+        return render_template("timeline.html")
+
+    @app.route("/api/timeline/years")
+    def api_timeline_years():
+        """Get all years with video counts."""
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    strftime('%Y', creation_date) as year,
+                    COUNT(*) as video_count,
+                    MIN(creation_date) as earliest,
+                    MAX(creation_date) as latest
+                FROM videos 
+                WHERE creation_date IS NOT NULL
+                GROUP BY year
+                ORDER BY year DESC
+            """)
+            
+            years = []
+            for row in cursor.fetchall():
+                years.append({
+                    "year": row["year"],
+                    "count": row["video_count"],
+                    "total_seconds": 0  # Will calculate below
+                })
+            
+            # Get total duration for each year
+            for year_data in years:
+                cursor.execute("""
+                    SELECT SUM(duration_seconds) as total_seconds
+                    FROM videos 
+                    WHERE strftime('%Y', creation_date) = ?
+                """, (year_data["year"],))
+                result = cursor.fetchone()
+                year_data["total_seconds"] = result["total_seconds"] or 0
+            
+            return jsonify({"years": years})
+        except Exception as e:
+            current_app.logger.error(f"Error fetching timeline years: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
+    @app.route("/api/timeline/year/<year>")
+    def api_timeline_year(year: str):
+        """Get video counts by month and activity heatmap for a specific year."""
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Get monthly counts
+            cursor.execute("""
+                SELECT 
+                    strftime('%m', creation_date) as month,
+                    COUNT(*) as video_count,
+                    SUM(duration_seconds) as total_seconds
+                FROM videos 
+                WHERE strftime('%Y', creation_date) = ?
+                GROUP BY month
+                ORDER BY month
+            """, (year,))
+            
+            months = {str(i).zfill(2): 0 for i in range(1, 13)}
+            total_seconds = 0
+            for row in cursor.fetchall():
+                months[row["month"]] = row["video_count"]
+                total_seconds += row["total_seconds"] or 0
+            
+            # Get activity heatmap data (date -> count)
+            cursor.execute("""
+                SELECT 
+                    date(creation_date) as date,
+                    COUNT(*) as count
+                FROM videos 
+                WHERE strftime('%Y', creation_date) = ?
+                GROUP BY date
+                ORDER BY date
+            """, (year,))
+            
+            activity = []
+            active_days = 0
+            for row in cursor.fetchall():
+                if row["date"]:
+                    activity.append({
+                        "date": row["date"],
+                        "count": row["count"]
+                    })
+                    if row["count"] > 0:
+                        active_days += 1
+            
+            return jsonify({
+                "year": year,
+                "months": months,
+                "total": sum(months.values()),
+                "total_videos": sum(months.values()),
+                "total_seconds": total_seconds,
+                "active_days": active_days,
+                "activity": activity
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching timeline year: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
+    @app.route("/api/timeline/month/<year>/<month>")
+    def api_timeline_month(year: str, month: str):
+        """Get all days in a month with video counts."""
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Get daily counts for this month
+            cursor.execute("""
+                SELECT 
+                    strftime('%d', creation_date) as day,
+                    COUNT(*) as count,
+                    SUM(duration_seconds) as total_seconds
+                FROM videos 
+                WHERE strftime('%Y-%m', creation_date) = ?
+                GROUP BY day
+                ORDER BY day
+            """, (f"{year}-{month.zfill(2)}",))
+            
+            days = []
+            total_videos = 0
+            total_seconds = 0
+            for row in cursor.fetchall():
+                days.append({
+                    "day": int(row["day"]),
+                    "count": row["count"],
+                    "total_seconds": row["total_seconds"] or 0
+                })
+                total_videos += row["count"]
+                total_seconds += row["total_seconds"] or 0
+            
+            # Get all videos for this month for the grid
+            cursor.execute("""
+                SELECT 
+                    id,
+                    file_name,
+                    file_path,
+                    duration_seconds,
+                    resolution,
+                    thumbnail_path,
+                    scene_description,
+                    gps_location_name,
+                    creation_date,
+                    strftime('%d', creation_date) as day
+                FROM videos 
+                WHERE strftime('%Y-%m', creation_date) = ?
+                ORDER BY creation_date
+            """, (f"{year}-{month.zfill(2)}",))
+            
+            videos = []
+            for row in cursor.fetchall():
+                videos.append(dict(row))
+            
+            return jsonify({
+                "year": year,
+                "month": month,
+                "days": days,
+                "videos": videos,
+                "total_videos": total_videos,
+                "total_seconds": total_seconds
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching timeline month: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
+    @app.route("/api/timeline/day/<year>/<month>/<day>")
+    def api_timeline_day(year: str, month: str, day: str):
+        """Get videos for a specific date."""
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+        
+        try:
+            cursor = conn.cursor()
+            date_prefix = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+            
+            cursor.execute("""
+                SELECT 
+                    id,
+                    file_name,
+                    file_path,
+                    duration_seconds,
+                    resolution,
+                    thumbnail_path,
+                    scene_description,
+                    gps_location_name,
+                    creation_date
+                FROM videos 
+                WHERE date(creation_date) = date(?)
+                ORDER BY creation_date
+            """, (date_prefix,))
+            
+            videos = []
+            for row in cursor.fetchall():
+                videos.append(dict(row))
+            
+            return jsonify({
+                "date": date_prefix,
+                "videos": videos,
+                "count": len(videos)
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching timeline day: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
+    @app.route("/api/timeline/on-this-day")
+    def api_timeline_on_this_day():
+        """Get videos from the same day in previous years."""
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Get today's month and day
+            from datetime import datetime
+            today = datetime.now()
+            month_day = f"{today.month:02d}-{today.day:02d}"
+            
+            cursor.execute("""
+                SELECT 
+                    id,
+                    file_name,
+                    file_path,
+                    duration_seconds,
+                    resolution,
+                    thumbnail_path,
+                    scene_description,
+                    gps_location_name,
+                    creation_date,
+                    strftime('%Y', creation_date) as year
+                FROM videos 
+                WHERE strftime('%m-%d', creation_date) = ?
+                    AND strftime('%Y', creation_date) < ?
+                ORDER BY creation_date DESC
+            """, (month_day, str(today.year)))
+            
+            videos = []
+            for row in cursor.fetchall():
+                videos.append(dict(row))
+            
+            return jsonify({
+                "month_day": month_day,
+                "videos": videos,
+                "count": len(videos)
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error fetching on-this-day: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
     @app.route("/")
     def browse():
         """Render the browse page shell."""
@@ -809,5 +1080,99 @@ def create_app(drive_path: str) -> Flask:
             except:
                 pass
 
+    @app.route("/video-file/<path:file_path>")
+    def serve_video_file(file_path):
+        """
+        Serve a video file directly for preview/hover.
+        Security: Only serves files within the configured drive path.
+        """
+        import os
+        import urllib.parse
+        from pathlib import Path
+        
+        # URL decode the file path
+        decoded_path = urllib.parse.unquote(file_path)
+        drive_path = Path(current_app.config["DRIVE_PATH"])
+        
+        # Handle both relative and absolute paths stored in database
+        if decoded_path.startswith(str(drive_path)):
+            # Path already includes drive path (absolute)
+            requested_path = Path(decoded_path)
+        else:
+            # Relative path - prepend drive path
+            requested_path = drive_path / decoded_path
+        
+        # Security check: ensure the requested path is within the drive
+        try:
+            requested_path.resolve().relative_to(drive_path.resolve())
+        except ValueError:
+            abort(403, "Access denied")
+        
+        if not requested_path.exists():
+            abort(404, "Video not found")
+        
+        if not requested_path.is_file():
+            abort(403, "Not a file")
+        
+        return send_file(requested_path, mimetype="video/mp4")
+
+    @app.route("/api/batch/set-location", methods=["POST"])
+    def api_batch_set_location():
+        """
+        Set location for multiple videos in batch.
+        Expects: { video_ids: [1, 2, 3], lat: 35.0, lon: 139.0, location_name: "Tokyo" }
+        """
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        video_ids = data.get("video_ids", [])
+        lat = data.get("lat")
+        lon = data.get("lon")
+        location_name = data.get("location_name", "").strip()
+        
+        if not video_ids:
+            return jsonify({"error": "No video IDs provided"}), 400
+        if lat is None or lon is None:
+            return jsonify({"error": "Latitude and longitude required"}), 400
+        if not location_name:
+            return jsonify({"error": "Location name required"}), 400
+        
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid coordinates"}), 400
+        
+        db_path = current_app.config["DB_PATH"]
+        conn = _get_thread_db_connection(db_path)
+        
+        try:
+            cursor = conn.cursor()
+            updated = 0
+            
+            for video_id in video_ids:
+                cursor.execute(
+                    "UPDATE videos SET gps_latitude = ?, gps_longitude = ?, gps_location_name = ? WHERE id = ?",
+                    (lat, lon, location_name, video_id)
+                )
+                if cursor.rowcount > 0:
+                    updated += 1
+            
+            conn.commit()
+            
+            return jsonify({
+                "success": True,
+                "updated": updated,
+                "location_name": location_name,
+                "lat": lat,
+                "lon": lon
+            })
+        except Exception as e:
+            conn.rollback()
+            current_app.logger.error(f"Error setting location: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     return app

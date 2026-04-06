@@ -340,8 +340,10 @@ document.addEventListener('DOMContentLoaded', () => {
         loading: false,
         hasMore: true,
         limit: 24,
-        offlineMode: false
-
+        offlineMode: false,
+        multiSelect: false,
+        selectedItems: new Set(),
+        allLoadedVideos: []
     };
 
     const elements = {
@@ -426,13 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Initial load
-    loadContent(true);
-    loadPlaylists();
-    initKeyboardShortcuts();
-    createKeyboardHelpModal();
-
-    // Infinite scroll
+    // Infinite scroll observer - MUST be defined before loadContent
     const observer = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && !state.loading && state.hasMore && !state.offlineMode) {
             state.page++;
@@ -443,6 +439,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, { rootMargin: '200px' });
 
+    // Initial load
+    loadContent(true);
     observer.observe(elements.sentinel);
 
     // Save scroll position before navigating away (any navigation)
@@ -553,7 +551,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.path = path;
         state.page = 1;
         state.hasMore = true;
-        clearSelection();
+        exitMultiSelectMode();
 
         // Update URL
         const url = new URL(window.location);
@@ -619,13 +617,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Add click handlers
         elements.folderGrid.querySelectorAll('.folder-card').forEach(card => {
-            card.addEventListener('click', () => handleCardClick(card));
+            card.addEventListener('click', (e) => handleCardClick(card, e));
             
             // Keyboard navigation
             card.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    handleCardClick(card);
+                    handleCardClick(card, e);
                 }
             });
         });
@@ -658,17 +656,20 @@ document.addEventListener('DOMContentLoaded', () => {
                tabindex="0"
                aria-label="${escapeHtml(ariaLabel)}"
                data-id="${video.id}"
-               data-type="video">
+               data-type="video"
+               data-video-path="${video.file_path}">
                 <div class="card-thumb">
                     ${video.thumbnail_path
                 ? `<img src="/thumbnail/${video.file_hash}" alt="${escapeHtml(desc || 'Video thumbnail')}" loading="lazy">`
                 : '<div class="no-thumb" role="img" aria-label="No preview available">No Preview</div>'}
+                    <video class="hover-preview" preload="none" muted playsinline></video>
                     ${video.duration_seconds
                 ? `<span class="card-duration" aria-label="Duration: ${formatDuration(video.duration_seconds)}">${formatDuration(video.duration_seconds)}</span>`
                 : ''}
                     ${video.source_device
                 ? `<span class="card-device" aria-label="Recorded on: ${video.source_device}">${video.source_device}</span>`
                 : ''}
+                    <span class="hover-hint" aria-hidden="true">▶ Hover to preview</span>
                 </div>
                 <div class="card-info">
                     <div class="card-filename">${video.file_name}</div>
@@ -684,9 +685,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         elements.videoGrid.insertAdjacentHTML('beforeend', html);
         
-        // Add keyboard navigation to new video cards
+        // Add keyboard navigation and click handlers to new video cards
         elements.videoGrid.querySelectorAll('.video-card:not([data-keyboard-ready])').forEach(card => {
             card.dataset.keyboardReady = 'true';
+            
+            // Click handler for multi-select (Ctrl/Cmd+Click)
+            card.addEventListener('click', (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    if (!state.multiSelect) {
+                        state.multiSelect = true;
+                    }
+                    toggleSelection(card);
+                } else if (state.multiSelect) {
+                    e.preventDefault();
+                    toggleSelection(card);
+                }
+            });
+            
             card.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
@@ -702,10 +718,87 @@ document.addEventListener('DOMContentLoaded', () => {
             if ('ontouchstart' in window) {
                 setupCardLongPress(card);
             }
+            
+            // Hover video preview
+            setupHoverPreview(card);
+        });
+    }
+    
+    function setupHoverPreview(card) {
+        const thumb = card.querySelector('.card-thumb');
+        const img = thumb.querySelector('img');
+        const preview = thumb.querySelector('.hover-preview');
+        const videoPath = card.dataset.videoPath;
+        const encodedVideoPath = encodeURIComponent(videoPath);
+        
+        if (!preview || !videoPath) return;
+        
+        let isPlaying = false;
+        let loadTimeout = null;
+        
+        thumb.addEventListener('mouseenter', () => {
+            // Delay loading to avoid flickering on quick passes
+            loadTimeout = setTimeout(() => {
+                if (!state.multiSelect && !isPlaying) {
+                    preview.src = `/video-file/${encodedVideoPath}`;
+                    preview.style.opacity = '0';
+                    preview.play().then(() => {
+                        preview.style.opacity = '1';
+                        if (img) img.style.opacity = '0';
+                        isPlaying = true;
+                    }).catch(() => {
+                        // Autoplay blocked or other error, just show thumbnail
+                    });
+                }
+            }, 200);
+        });
+        
+        thumb.addEventListener('mouseleave', () => {
+            clearTimeout(loadTimeout);
+            if (isPlaying) {
+                preview.pause();
+                preview.currentTime = 0;
+                preview.style.opacity = '0';
+                if (img) img.style.opacity = '1';
+                isPlaying = false;
+            }
+        });
+        
+        // Frame stepping with j/k when focused
+        card.addEventListener('keydown', (e) => {
+            if (state.multiSelect) return;
+            
+            if (e.key === 'j' || e.key === 'J') {
+                e.preventDefault();
+                // Navigate to previous video
+                const cards = Array.from(elements.videoGrid.querySelectorAll('.video-card'));
+                const idx = cards.indexOf(card);
+                if (idx > 0) {
+                    cards[idx - 1].focus();
+                }
+            } else if (e.key === 'k' || e.key === 'K') {
+                e.preventDefault();
+                // Navigate to next video
+                const cards = Array.from(elements.videoGrid.querySelectorAll('.video-card'));
+                const idx = cards.indexOf(card);
+                if (idx < cards.length - 1) {
+                    cards[idx + 1].focus();
+                }
+            }
         });
     }
 
-    function handleCardClick(card) {
+    function handleCardClick(card, event) {
+        // Ctrl/Cmd+Click enters multi-select mode and toggles selection
+        if (event && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            if (!state.multiSelect) {
+                state.multiSelect = true;
+            }
+            toggleSelection(card);
+            return;
+        }
+        
         if (state.multiSelect) {
             toggleSelection(card);
         } else {
@@ -733,10 +826,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!toolbar) return;
         
         const count = state.selectedItems.size;
-        if (count === 0 && state.multiSelect) {
+        if (count === 0) {
             toolbar.classList.remove('active');
             state.multiSelect = false;
-        } else if (count > 0) {
+        } else {
             toolbar.classList.add('active');
             toolbar.querySelector('.multi-select-count').textContent = `${count} selected`;
         }
@@ -864,6 +957,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Multi-select toolbar button handlers
         const cancelBtn = document.getElementById('cancel-selection');
         const addToPlaylistBtn = document.getElementById('add-to-playlist');
+        const selectAllBtn = document.getElementById('select-all-btn');
+        const deselectAllBtn = document.getElementById('deselect-all-btn');
+        
+        const setLocationBtn = document.getElementById('set-location-btn');
         
         if (cancelBtn) {
             cancelBtn.addEventListener('click', exitMultiSelectMode);
@@ -872,6 +969,41 @@ document.addEventListener('DOMContentLoaded', () => {
         if (addToPlaylistBtn) {
             addToPlaylistBtn.addEventListener('click', addSelectedToPlaylist);
         }
+        
+        if (setLocationBtn) {
+            setLocationBtn.addEventListener('click', setSelectedLocation);
+        }
+        
+        if (selectAllBtn) {
+            selectAllBtn.addEventListener('click', selectAll);
+        }
+        
+        if (deselectAllBtn) {
+            deselectAllBtn.addEventListener('click', deselectAll);
+        }
+    }
+    
+    function selectAll() {
+        state.multiSelect = true;
+        const allCards = document.querySelectorAll('.folder-card, .video-card');
+        allCards.forEach(card => {
+            const id = card.dataset.path || card.dataset.id;
+            if (id) {
+                state.selectedItems.add(id);
+                card.classList.add('selected');
+                card.setAttribute('aria-selected', 'true');
+            }
+        });
+        updateMultiSelectToolbar();
+    }
+    
+    function deselectAll() {
+        state.selectedItems.clear();
+        document.querySelectorAll('.folder-card.selected, .video-card.selected').forEach(card => {
+            card.classList.remove('selected');
+            card.setAttribute('aria-selected', 'false');
+        });
+        updateMultiSelectToolbar();
     }
     
     function exitMultiSelectMode() {
@@ -884,19 +1016,220 @@ document.addEventListener('DOMContentLoaded', () => {
         updateMultiSelectToolbar();
     }
     
-    function addSelectedToPlaylist() {
+    async function addSelectedToPlaylist() {
         const selectedIds = Array.from(state.selectedItems);
         if (selectedIds.length === 0) return;
-        
-        // Dispatch custom event for playlist handling
-        const event = new CustomEvent('addToPlaylist', {
-            detail: { ids: selectedIds }
-        });
-        document.dispatchEvent(event);
-        
-        // Show feedback to user
-        showNotification(`${selectedIds.length} items ready to add to playlist`);
-        exitMultiSelectMode();
+
+        const modal = document.getElementById('playlist-picker-modal');
+        const optionsContainer = document.getElementById('playlist-options');
+        const newNameInput = document.getElementById('new-playlist-name');
+        const confirmBtn = document.getElementById('confirm-add-to-playlist');
+        const cancelBtn = document.getElementById('cancel-playlist-picker');
+
+        let selectedPlaylistId = null;
+
+        // Load playlists
+        try {
+            const response = await fetch('/api/playlists');
+            const data = await response.json();
+
+            if (!data.playlists || data.playlists.length === 0) {
+                optionsContainer.innerHTML = '<p class="text-muted">No playlists yet. Create one below.</p>';
+            } else {
+                optionsContainer.innerHTML = data.playlists.map(p => `
+                    <div class="playlist-option" data-id="${p.id}">
+                        <span class="playlist-color" style="background: ${p.color || '#3b82f6'}"></span>
+                        <span class="playlist-name">${escapeHtml(p.name)}</span>
+                        <span class="playlist-count">${p.video_count || 0}</span>
+                    </div>
+                `).join('');
+
+                optionsContainer.querySelectorAll('.playlist-option').forEach(opt => {
+                    opt.addEventListener('click', () => {
+                        optionsContainer.querySelectorAll('.playlist-option').forEach(o => o.classList.remove('selected'));
+                        opt.classList.add('selected');
+                        selectedPlaylistId = opt.dataset.id;
+                        newNameInput.value = '';
+                    });
+                });
+            }
+        } catch (error) {
+            optionsContainer.innerHTML = '<p class="error">Failed to load playlists</p>';
+        }
+
+        // Show modal
+        modal.classList.add('show');
+        newNameInput.value = '';
+        selectedPlaylistId = null;
+
+        // Cancel handler
+        cancelBtn.onclick = () => {
+            modal.classList.remove('show');
+        };
+
+        // Close on backdrop click
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('show');
+            }
+        };
+
+        // Confirm handler
+        confirmBtn.onclick = async () => {
+            const newName = newNameInput.value.trim();
+
+            if (!selectedPlaylistId && !newName) {
+                alert('Please select a playlist or enter a new name');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/batch/add-to-playlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        video_ids: selectedIds.filter(id => !isNaN(parseInt(id))).map(id => parseInt(id)),
+                        playlist_id: selectedPlaylistId ? parseInt(selectedPlaylistId) : null,
+                        playlist_name: newName || null
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    modal.classList.remove('show');
+                    showNotification(`Added ${selectedIds.length} videos to "${newName || 'playlist'}"`);
+                    exitMultiSelectMode();
+                } else {
+                    alert(data.error || 'Failed to add to playlist');
+                }
+            } catch (error) {
+                console.error('Error adding to playlist:', error);
+                alert('Failed to add to playlist');
+            }
+        };
+    }
+    
+    async function setSelectedLocation() {
+        const selectedIds = Array.from(state.selectedItems).filter(id => !isNaN(parseInt(id))).map(id => parseInt(id));
+        if (selectedIds.length === 0) return;
+
+        const modal = document.getElementById('location-picker-modal');
+        const searchInput = document.getElementById('location-search');
+        const resultsContainer = document.getElementById('location-results');
+        const latInput = document.getElementById('location-lat');
+        const lonInput = document.getElementById('location-lon');
+        const nameInput = document.getElementById('location-name');
+        const confirmBtn = document.getElementById('confirm-set-location');
+        const cancelBtn = document.getElementById('cancel-location-picker');
+
+        let selectedLocation = null;
+        let searchTimeout = null;
+
+        // Search handler with debounce
+        searchInput.oninput = () => {
+            clearTimeout(searchTimeout);
+            const query = searchInput.value.trim();
+            if (!query) {
+                resultsContainer.innerHTML = '';
+                return;
+            }
+            
+            searchTimeout = setTimeout(async () => {
+                resultsContainer.innerHTML = '<p class="text-muted">Searching...</p>';
+                try {
+                    const response = await fetch(`/api/map/geocode?location=${encodeURIComponent(query)}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        selectedLocation = { lat: data.lat, lon: data.lon, name: query };
+                        resultsContainer.innerHTML = `
+                            <div class="location-result selected" data-lat="${data.lat}" data-lon="${data.lon}">
+                                <span class="location-name">${escapeHtml(query)}</span>
+                                <span class="location-coords">${data.lat.toFixed(4)}, ${data.lon.toFixed(4)}</span>
+                            </div>
+                        `;
+                        latInput.value = data.lat.toFixed(6);
+                        lonInput.value = data.lon.toFixed(6);
+                        nameInput.value = query;
+                    } else {
+                        resultsContainer.innerHTML = '<p class="text-muted">Location not found. Enter coordinates manually.</p>';
+                    }
+                } catch (error) {
+                    resultsContainer.innerHTML = '<p class="error">Search failed. Enter coordinates manually.</p>';
+                }
+            }, 500);
+        };
+
+        // Show modal
+        modal.classList.add('show');
+        searchInput.value = '';
+        resultsContainer.innerHTML = '';
+        latInput.value = '';
+        lonInput.value = '';
+        nameInput.value = '';
+
+        // Cancel handler
+        cancelBtn.onclick = () => {
+            modal.classList.remove('show');
+        };
+
+        // Close on backdrop click
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('show');
+            }
+        };
+
+        // Confirm handler
+        confirmBtn.onclick = async () => {
+            const lat = parseFloat(latInput.value);
+            const lon = parseFloat(lonInput.value);
+            const name = nameInput.value.trim();
+
+            if (isNaN(lat) || isNaN(lon) || !name) {
+                alert('Please enter valid latitude, longitude, and location name');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/batch/set-location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        video_ids: selectedIds,
+                        lat: lat,
+                        lon: lon,
+                        location_name: name
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    modal.classList.remove('show');
+                    showNotification(`Set location for ${selectedIds.length} videos`);
+                    
+                    // Update the location display on selected cards
+                    selectedIds.forEach(id => {
+                        const card = document.querySelector(`.video-card[data-id="${id}"]`);
+                        if (card) {
+                            const meta = card.querySelector('.card-meta');
+                            if (meta) {
+                                const resolution = meta.textContent.split('|')[0]?.trim() || '';
+                                meta.textContent = resolution ? `${resolution} | ${name}` : name;
+                            }
+                        }
+                    });
+                    
+                    exitMultiSelectMode();
+                } else {
+                    alert(data.error || 'Failed to set location');
+                }
+            } catch (error) {
+                console.error('Error setting location:', error);
+                alert('Failed to set location');
+            }
+        };
     }
     
     function showNotification(message) {

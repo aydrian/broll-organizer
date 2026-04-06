@@ -334,7 +334,6 @@ function renderMonthsGrid(container, year) {
         monthCard.href = `/timeline/${year}/${month}`;
         monthCard.innerHTML = `
             <span class="month-name">${monthName}</span>
-            <span class="month-number">${month}</span>
         `;
         
         monthCard.addEventListener('click', (e) => {
