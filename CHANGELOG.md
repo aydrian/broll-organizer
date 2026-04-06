@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-06
+
+### Added
+- **Timeline View** - Browse B-roll chronologically by year, month, and day with activity heatmap
+- **Batch Operations & Multi-Select** - Select multiple videos with Ctrl/Cmd+Click, then batch add to playlists or set location
+- **Hover Video Previews** - Preview videos on hover in browse view with 200ms delay
+- **Location Picker** - Search for places or enter coordinates manually when setting location
+- Enhanced keyboard shortcuts (J/K for navigating videos)
+
+### Fixed
+- Fixed all JavaScript errors in browse.js (ReferenceError issues)
+- Fixed duplicate "Online" indicators in header
+- Fixed folder navigation not working
+- Fixed multi-select toolbar not dismissing after operations
+- Fixed location display not updating immediately after batch set
+- Fixed timeline showing month numbers alongside names
+- Fixed missing API endpoint for month view in timeline
+- Fixed video-file endpoint for hover previews
+
+### Changed
+- Improved batch selection UI with "Select All" and "Deselect" buttons
+- Updated multi-select toolbar with "📍 Location" button
+
 ## [0.3.0] - 2026-04-05
 
 ### Added
@@ -19,59 +42,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Moved project to `/home/openclaw/apps/broll-organizer`
 - Web UI now detects drive connection status before each request
-- API returns 503 with JSON error when drive is offline
+- API returns 503 with JSON error when drive is disconnected
 
-### Fixed
-- Folder display bug: video files no longer appear as folders
-- Merge conflicts in PR #9 resolved
-- All code review issues addressed (#1, #2, #3, #4, #5, #6)
-
-## [0.2.3] - 2026-04-05
-
-### Fixed
-- Upgrade sqlite-vec to 0.1.9 (includes aarch64 64-bit wheel for Raspberry Pi)
-- Web UI and Agent API now work with full sqlite-vec functionality on Pi
-- Revert web/app.py to use Database class with sqlite-vec support
-
-## [0.2.1] - 2026-04-05
+## [0.2.0] - 2025-12-21
 
 ### Added
-- `.env` file support via `python-dotenv` for easy configuration
-- `.env.example` template file
-
-## [0.2.0] - 2026-04-05
-
-### Added
-- Fireworks AI support with Kimi K2.5 Turbo for vision, chat, and embeddings
-- Ollama fallback mode for local/offline usage (`AI_PROVIDER=ollama`)
-- OpenClaw Agent API (`broll agent` command) with REST endpoints:
-  - `GET /health` - Health check
-  - `GET /stats` - Catalog statistics
-  - `GET /search?q=...` - Full-text search
-  - `GET /videos` - List videos with filtering
-  - `GET /video/<id>` - Get single video
-  - `GET /thumbnail/<id>` - Get video thumbnail
-  - `POST /chat` - Chat with catalog (keyword search)
-- OpenClaw skill in `skills/broll-catalog/` for `npx openclaw skills add`
-- Environment-based configuration for AI provider selection
-
-### Changed
-- Updated README with Fireworks setup instructions
-- `analyzer.py`, `embeddings.py`, `chat.py` now support dual providers
-- Agent API uses plain sqlite3 (avoids sqlite-vec architecture issues)
+- Interactive map view for browsing geotagged videos
+- Location-based filtering in sidebar
+- Cluster markers for dense video regions
+- Popup previews on map markers
 
 ### Fixed
-- Handle missing database columns gracefully in Agent API
-- Column name compatibility (`file_size` vs `file_size_bytes`)
+- GPS coordinate extraction from DJI video metadata
+- Thumbnail generation for 4K videos
 
-## [0.1.0] - 2026-02-15
+## [0.1.0] - 2025-12-15
 
 ### Added
-- Initial release with Ollama-only support
-- CLI commands: `init`, `process`, `search`, `stats`, `web`
-- Web UI for browsing and searching catalog
-- SQLite database with FTS5 and sqlite-vec
-- Video metadata extraction via FFmpeg
-- Vision analysis with minicpm-v via Ollama
-- Keyframe extraction and thumbnail generation
-- GPS reverse geocoding for location names
+- Initial release
+- Video catalog with AI-generated scene descriptions
+- Thumbnail generation with keyframe extraction
+- Search with keyword + semantic (sqlite-vec) hybrid
+- Playlist/collection management
+- Basic web UI for browsing and searching

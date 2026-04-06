@@ -79,7 +79,7 @@ def _get_migration_status(drive_path: Path) -> str:
 
 
 @click.group()
-@click.version_option(version='0.3.0')
+@click.version_option(version='0.4.0')
 def cli():
     '''B-Roll Organizer - AI-powered video catalog using local LLMs.'''
     pass
