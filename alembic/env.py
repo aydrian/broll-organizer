@@ -38,11 +38,19 @@ if config.config_file_name is not None:
 
 def get_db_url() -> str:
     """
-    Get database URL from CLI arguments or config.
-    
-    Supports -x drive_path=/path/to/drive to dynamically construct
-    the SQLite URL for the external drive.
+    Get database URL from environment, CLI arguments, or config.
+
+    Priority:
+    1. DATABASE_URL environment variable
+    2. -x drive_path=/path/to/drive CLI argument
+    3. sqlalchemy.url in alembic.ini
     """
+    # First, check environment variable
+    import os
+    env_url = os.environ.get("DATABASE_URL")
+    if env_url:
+        return env_url
+
     # Try to get drive path from command line arguments (-x drive_path=...)
     cmd_line = config.cmd_opts
     if cmd_line is not None and hasattr(cmd_line, 'x') and cmd_line.x:
@@ -54,12 +62,12 @@ def get_db_url() -> str:
                 from broll.config import DB_FILENAME
                 db_path = Path(drive_path) / '.broll' / DB_FILENAME
                 return f"sqlite:///{db_path.absolute()}"
-    
+
     # Fallback to config option
     db_url = config.get_main_option("sqlalchemy.url")
     if db_url and not db_url.endswith('placeholder.db'):
         return db_url
-    
+
     raise ValueError(
         "No database URL configured. Use -x drive_path=/path/to/drive "
         "or set sqlalchemy.url in alembic.ini"

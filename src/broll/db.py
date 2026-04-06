@@ -1680,3 +1680,350 @@ class Database:
         conn = self.connect()
         conn.execute("DELETE FROM video_markers WHERE video_id = ?", (video_id,))
         conn.commit()
+
+    # ------------------------------------------------------------------
+    # Project operations
+    # ------------------------------------------------------------------
+
+    def create_project(
+        self,
+        name: str,
+        description: str | None = None,
+        aspect_ratio: str | None = None,
+        target_duration_seconds: float | None = None,
+        canva_link: str | None = None,
+        status: str = "active"
+    ) -> int:
+        """Insert a new project and return its ID."""
+        conn = self.connect()
+        cursor = conn.execute(
+            """
+            INSERT INTO projects (name, description, status, aspect_ratio,
+                                  target_duration_seconds, canva_link)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (name, description, status, aspect_ratio, target_duration_seconds, canva_link)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_project(self, project_id: int) -> dict[str, Any] | None:
+        """Get a single project by ID."""
+        conn = self.connect()
+        row = conn.execute(
+            "SELECT * FROM projects WHERE id = ?",
+            (project_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_projects(
+        self,
+        status: str | None = None,
+        aspect_ratio: str | None = None
+    ) -> list[dict[str, Any]]:
+        """
+        Get all projects with optional filters.
+        Returns projects ordered by updated_at DESC.
+        """
+        conn = self.connect()
+        conditions = []
+        params = []
+
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+        if aspect_ratio is not None:
+            conditions.append("aspect_ratio = ?")
+            params.append(aspect_ratio)
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        sql = f"""
+            SELECT * FROM projects
+            {where_clause}
+            ORDER BY updated_at DESC
+        """
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_project(self, project_id: int, updates: dict[str, Any]):
+        """Update project fields. Always updates updated_at."""
+        conn = self.connect()
+
+        # Always update updated_at
+        updates["updated_at"] = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+
+        set_clause = ", ".join([f"{k} = :{k}" for k in updates.keys()])
+        updates["project_id"] = project_id
+
+        sql = f"UPDATE projects SET {set_clause} WHERE id = :project_id"
+        conn.execute(sql, updates)
+        conn.commit()
+
+    def delete_project(self, project_id: int) -> bool:
+        """
+        Delete a project and all its clips.
+        Returns True if a project was deleted, False otherwise.
+        """
+        conn = self.connect()
+        cursor = conn.execute(
+            "DELETE FROM projects WHERE id = ?",
+            (project_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Project clip operations
+    # ------------------------------------------------------------------
+
+    def add_project_clip(
+        self,
+        project_id: int,
+        video_id: int,
+        video_marker_id: int | None = None,
+        position: int | None = None,
+        notes: str | None = None
+    ) -> int:
+        """
+        Add a clip to a project.
+        Also records clip usage and updates project updated_at.
+        Returns the clip ID.
+        """
+        conn = self.connect()
+
+        # Get next position if not provided
+        if position is None:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM project_clips WHERE project_id = ?",
+                (project_id,)
+            ).fetchone()
+            position = row[0]
+
+        # Insert the project clip
+        cursor = conn.execute(
+            """
+            INSERT INTO project_clips (project_id, video_id, video_marker_id, position, notes)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (project_id, video_id, video_marker_id, position, notes)
+        )
+        clip_id = cursor.lastrowid
+
+        # Record clip usage
+        self.record_clip_usage(video_id, project_id, video_marker_id)
+
+        # Update project updated_at
+        conn.execute(
+            "UPDATE projects SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+            (project_id,)
+        )
+
+        conn.commit()
+        return clip_id
+
+    def get_project_clips(self, project_id: int) -> list[dict[str, Any]]:
+        """
+        Get all clips for a project with full info.
+        Joins with videos and video_markers.
+        Ordered by position.
+        """
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT
+                pc.id,
+                pc.project_id,
+                pc.video_id,
+                pc.video_marker_id,
+                pc.position,
+                pc.notes,
+                pc.created_at,
+                v.file_name as filename,
+                v.duration_seconds as video_duration,
+                v.resolution,
+                v.thumbnail_path,
+                vm.label as marker_label,
+                vm.in_seconds as marker_in,
+                vm.out_seconds as marker_out
+            FROM project_clips pc
+            JOIN videos v ON pc.video_id = v.id
+            LEFT JOIN video_markers vm ON pc.video_marker_id = vm.id
+            WHERE pc.project_id = ?
+            ORDER BY pc.position
+            """,
+            (project_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_clip_usage(
+        self,
+        video_id: int,
+        project_id: int | None = None,
+        video_marker_id: int | None = None
+    ) -> int:
+        """
+        Record a clip usage.
+        Returns the usage record ID.
+        """
+        conn = self.connect()
+        cursor = conn.execute(
+            """
+            INSERT INTO clip_usage (video_id, project_id, video_marker_id)
+            VALUES (?, ?, ?)
+            """,
+            (video_id, project_id, video_marker_id)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_clip_usage(
+        self,
+        video_id: int,
+        video_marker_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """
+        Get all usage records for a clip.
+        Joins with projects for project_name.
+        """
+        conn = self.connect()
+        if video_marker_id is not None:
+            rows = conn.execute(
+                """
+                SELECT
+                    cu.id,
+                    cu.video_id,
+                    cu.video_marker_id,
+                    cu.project_id,
+                    cu.used_at,
+                    p.name as project_name
+                FROM clip_usage cu
+                LEFT JOIN projects p ON cu.project_id = p.id
+                WHERE cu.video_id = ? AND cu.video_marker_id = ?
+                ORDER BY cu.used_at DESC
+                """,
+                (video_id, video_marker_id)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT
+                    cu.id,
+                    cu.video_id,
+                    cu.video_marker_id,
+                    cu.project_id,
+                    cu.used_at,
+                    p.name as project_name
+                FROM clip_usage cu
+                LEFT JOIN projects p ON cu.project_id = p.id
+                WHERE cu.video_id = ? AND cu.video_marker_id IS NULL
+                ORDER BY cu.used_at DESC
+                """,
+                (video_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_clip_usage_count(
+        self,
+        video_id: int,
+        video_marker_id: int | None = None
+    ) -> int:
+        """Get the count of usage records for a clip."""
+        conn = self.connect()
+        if video_marker_id is not None:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) FROM clip_usage
+                WHERE video_id = ? AND video_marker_id = ?
+                """,
+                (video_id, video_marker_id)
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) FROM clip_usage
+                WHERE video_id = ? AND video_marker_id IS NULL
+                """,
+                (video_id,)
+            ).fetchone()
+        return row[0] if row else 0
+
+    def remove_project_clip(self, project_id: int, clip_id: int) -> bool:
+        """
+        Remove a clip from a project and renumber remaining positions.
+        Returns True if clip was removed, False otherwise.
+        """
+        conn = self.connect()
+
+        # Get the clip's position first
+        row = conn.execute(
+            "SELECT position FROM project_clips WHERE id = ? AND project_id = ?",
+            (clip_id, project_id)
+        ).fetchone()
+
+        if not row:
+            return False
+
+        position = row[0]
+
+        # Delete the clip
+        conn.execute(
+            "DELETE FROM project_clips WHERE id = ? AND project_id = ?",
+            (clip_id, project_id)
+        )
+
+        # Renumber remaining positions
+        conn.execute(
+            """
+            UPDATE project_clips
+            SET position = position - 1
+            WHERE project_id = ? AND position > ?
+            """,
+            (project_id, position)
+        )
+
+        # Update project updated_at
+        conn.execute(
+            "UPDATE projects SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+            (project_id,)
+        )
+
+        conn.commit()
+        return True
+
+    def reorder_project_clips(self, project_id: int, clip_ids: list[int]):
+        """
+        Reorder clips in a project.
+        clip_ids should be in the desired order.
+        """
+        conn = self.connect()
+
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            # Update each clip's position
+            for position, clip_id in enumerate(clip_ids, start=1):
+                conn.execute(
+                    """
+                    UPDATE project_clips
+                    SET position = ?
+                    WHERE id = ? AND project_id = ?
+                    """,
+                    (position, clip_id, project_id)
+                )
+
+            # Update project updated_at
+            conn.execute(
+                """
+                UPDATE projects
+                SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                WHERE id = ?
+                """,
+                (project_id,)
+            )
+
+            conn.commit()
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise

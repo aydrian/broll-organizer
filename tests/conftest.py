@@ -30,6 +30,32 @@ def empty_database(temp_db_path):
 
 
 @pytest.fixture
+def empty_project_db(temp_db_path):
+    """Create a database with full migrations (including projects tables)."""
+    import subprocess
+    import os
+
+    project_root = Path(__file__).parent.parent
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"sqlite:///{temp_db_path}"
+
+    # Run all alembic migrations from scratch
+    subprocess.run(
+        ["uv", "run", "alembic", "upgrade", "head"],
+        cwd=project_root,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+    # Connect to the migrated database
+    db = Database(temp_db_path)
+
+    yield db
+    db.close()
+
+
+@pytest.fixture
 def sample_videos_database(temp_db_path):
     """Create a database with sample video records for testing."""
     db = Database(temp_db_path)
