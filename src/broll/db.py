@@ -972,6 +972,65 @@ class Database:
 
         return stats
 
+    def search_with_usage_filter(
+        self,
+        query: str,
+        exclude_used_in_project: int | None = None,
+        show_usage: bool = False
+    ) -> list[dict[str, Any]]:
+        """Search videos/markers with optional usage filtering.
+
+        Args:
+            query: Search query
+            exclude_used_in_project: If set, exclude clips already used in this project
+            show_usage: If True, include usage count in results
+        """
+        conn = self.connect()
+
+        # Base FTS query
+        sql = """
+            SELECT v.id as video_id, v.file_name, v.duration_seconds,
+                   v.width, v.height,
+                   vm.id as marker_id, vm.label as marker_label,
+                   vm.in_seconds, vm.out_seconds
+            FROM videos v
+            JOIN videos_fts fts ON v.rowid = fts.rowid
+            LEFT JOIN video_markers vm ON vm.video_id = v.id
+            WHERE videos_fts MATCH ?
+        """
+        params = [query]
+
+        if exclude_used_in_project:
+            sql += """
+            AND NOT EXISTS (
+                SELECT 1 FROM project_clips pc
+                WHERE pc.video_id = v.id
+                AND (pc.video_marker_id IS NULL OR pc.video_marker_id = vm.id)
+                AND pc.project_id = ?
+            )
+            """
+            params.append(exclude_used_in_project)
+
+        cursor = conn.execute(sql, params)
+        results = []
+
+        for row in cursor.fetchall():
+            result = dict(row)
+
+            if show_usage:
+                # Get usage count for this clip
+                if result["marker_id"]:
+                    count = self.get_clip_usage_count(
+                        result["video_id"], result["marker_id"]
+                    )
+                else:
+                    count = self.get_clip_usage_count(result["video_id"])
+                result["usage_count"] = count
+
+            results.append(result)
+
+        return results
+
     # ------------------------------------------------------------------
     # Geocoding cache operations
     # ------------------------------------------------------------------
@@ -2027,3 +2086,137 @@ class Database:
         except Exception:
             conn.execute("ROLLBACK")
             raise
+
+    def export_project(
+        self,
+        project_id: int,
+        output_path: Path,
+        video_source_dir: Path
+    ) -> dict[str, Any]:
+        """Export project clips as numbered MP4s and voiceover script.
+
+        Returns manifest dict with export info.
+        """
+        import zipfile
+        import subprocess
+        import tempfile
+
+        conn = self.connect()
+
+        # Get project details
+        project = self.get_project(project_id)
+        if not project:
+            raise ValueError(f"Project not found: {project_id}")
+
+        # Get all clips
+        clips = self.get_project_clips(project_id)
+        if not clips:
+            raise ValueError(f"Project has no clips: {project_id}")
+
+        # Create output directory
+        export_dir = Path(output_path).parent
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        exported_files = []
+        manifest_clips = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+
+            for i, clip in enumerate(clips, start=1):
+                # Get video file path from the database join
+                video_path = video_source_dir / clip["file_name"]
+                if not video_path.exists():
+                    raise FileNotFoundError(f"Video file not found: {video_path}")
+
+                output_filename = f"{i:03d}.mp4"
+                output_file = tmpdir_path / output_filename
+
+                # Build FFmpeg command
+                if clip["video_marker_id"]:
+                    # Extract marked segment
+                    in_time = clip["in_seconds"]
+                    out_time = clip["out_seconds"]
+                    duration = out_time - in_time
+
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", str(in_time),
+                        "-t", str(duration),
+                        "-i", str(video_path),
+                        "-c:v", "libx264",
+                        "-preset", "fast",
+                        "-crf", "23",
+                        "-pix_fmt", "yuv420p",
+                        "-c:a", "aac",
+                        "-b:a", "128k",
+                        str(output_file)
+                    ]
+                else:
+                    # Copy whole video with re-encode for compatibility
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-i", str(video_path),
+                        "-c:v", "libx264",
+                        "-preset", "fast",
+                        "-crf", "23",
+                        "-pix_fmt", "yuv420p",
+                        "-c:a", "aac",
+                        "-b:a", "128k",
+                        str(output_file)
+                    ]
+
+                subprocess.run(cmd, check=True, capture_output=True)
+                exported_files.append(output_file)
+
+                manifest_clips.append({
+                    "sequence": i,
+                    "filename": output_filename,
+                    "original_video": clip["file_name"],
+                    "marker_label": clip.get("marker_label"),
+                    "in_seconds": clip.get("in_seconds"),
+                    "out_seconds": clip.get("out_seconds"),
+                    "duration_seconds": (clip["out_seconds"] - clip["in_seconds"]) if clip.get("video_marker_id") else None,
+                    "notes": clip.get("notes")
+                })
+
+            # Create ZIP file
+            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                # Add video files
+                for video_file in exported_files:
+                    zf.write(video_file, video_file.name)
+
+                # Add voiceover script
+                if project.get("description"):
+                    script_content = f"""Project: {project['name']}
+Target Duration: {project.get('target_duration_seconds') or 'N/A'} seconds
+Aspect Ratio: {project.get('aspect_ratio') or 'N/A'}
+
+=== VO Script ===
+
+{project.get('description', 'No voiceover script provided.')}
+
+=== End Script ===
+"""
+                else:
+                    script_content = f"""Project: {project['name']}
+Target Duration: {project.get('target_duration_seconds') or 'N/A'} seconds
+Aspect Ratio: {project.get('aspect_ratio') or 'N/A'}
+
+No voiceover script provided.
+"""
+
+                zf.writestr("voiceover.txt", script_content)
+
+                # Add manifest
+                manifest = {
+                    "project_id": project_id,
+                    "name": project["name"],
+                    "exported_at": conn.execute(
+                        "SELECT strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+                    ).fetchone()[0],
+                    "clips": manifest_clips
+                }
+                zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+
+        return manifest

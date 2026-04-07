@@ -449,6 +449,17 @@ RESOLUTION_MAP = {
     "--device",
     help="Filter by source device (e.g., dji_pocket3, iphone)"
 )
+@click.option(
+    "--unused-in-project",
+    type=int,
+    default=None,
+    help="Exclude clips already used in this project ID"
+)
+@click.option(
+    "--show-usage",
+    is_flag=True,
+    help="Show usage heatmap (count per result)"
+)
 def search(
     query: str | None,
     drive: str,
@@ -479,6 +490,9 @@ def search(
     time_of_day: str | None,
     location: str | None,
     device: str | None,
+    # Usage
+    unused_in_project: int | None,
+    show_usage: bool,
 ):
     """Search for video clips by description and/or filters.
 
@@ -1990,6 +2004,43 @@ def reorder(project_id: int, drive: str, clips: str):
     with Database(db_path) as db:
         db.reorder_project_clips(project_id, clip_ids)
         click.echo(f"Reordered {len(clip_ids)} clips in project {project_id}")
+
+
+@project.command(name='export')
+@click.argument('project_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--format', default='canva', type=click.Choice(['canva']), help='Export format')
+@click.option('--output', '-o', required=True, type=click.Path(), help='Output ZIP file path')
+def export_project(project_id: int, drive: str, format: str, output: str):
+    """Export project as Canva-ready ZIP with clips and voiceover script."""
+    import subprocess
+
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+    video_source_dir = drive_path  # Videos are in drive root
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    output_path = Path(output)
+
+    with Database(db_path) as db:
+        try:
+            manifest = db.export_project(project_id, output_path, video_source_dir)
+            click.echo(f"Exported project to {output_path}")
+            click.echo(f"  - {len(manifest['clips'])} clips")
+            click.echo(f"  - voiceover.txt")
+            click.echo(f"  - manifest.json")
+        except FileNotFoundError as e:
+            click.echo(f"Video file not found: {e}", err=True)
+            raise SystemExit(1)
+        except subprocess.CalledProcessError as e:
+            click.echo(f"FFmpeg error: {e}", err=True)
+            raise SystemExit(1)
+        except ValueError as e:
+            click.echo(str(e), err=True)
+            raise SystemExit(1)
 
 
 # =============================================================================
