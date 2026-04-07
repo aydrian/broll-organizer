@@ -443,3 +443,202 @@ class TestProjectShow:
         assert "9:16" in result.output
         assert "Opening" in result.output  # Marker label
         assert "Clips (2)" in result.output
+
+
+class TestProjectAddClip:
+    """Tests for project add-clip command."""
+
+    def test_add_clip_with_video(self, cli_runner, tmp_path):
+        """Add a whole video as a clip."""
+        from broll.cli import cli
+
+        drive_path = tmp_path / "drive"
+        drive_path.mkdir()
+
+        mock_db = MagicMock()
+        mock_db.add_project_clip.return_value = 789
+        mock_db.get_project.return_value = {"id": 123, "name": "Test Project"}
+
+        with patch("broll.cli.get_db_path", return_value=tmp_path / "test.db"):
+            with patch("broll.cli.Database") as MockDB:
+                MockDB.return_value.__enter__ = MagicMock(return_value=mock_db)
+                MockDB.return_value.__exit__ = MagicMock(return_value=False)
+
+                (tmp_path / "test.db").touch()
+
+                result = cli_runner.invoke(cli, [
+                    "project", "add-clip", "123",
+                    "--drive", str(drive_path),
+                    "--video", "456"
+                ])
+
+        assert result.exit_code == 0
+        mock_db.add_project_clip.assert_called_once()
+        call_args = mock_db.add_project_clip.call_args
+        assert call_args[0][0] == 123  # project_id is positional
+        assert call_args[1]["video_id"] == 456
+
+    def test_add_clip_requires_video_or_marker(self, cli_runner, tmp_path):
+        """Must specify either --video or --marker."""
+        from broll.cli import cli
+
+        drive_path = tmp_path / "drive"
+        drive_path.mkdir()
+
+        mock_db = MagicMock()
+        mock_db.get_project.return_value = {"id": 123, "name": "Test Project"}
+
+        with patch("broll.cli.get_db_path", return_value=tmp_path / "test.db"):
+            with patch("broll.cli.Database") as MockDB:
+                MockDB.return_value.__enter__ = MagicMock(return_value=mock_db)
+                MockDB.return_value.__exit__ = MagicMock(return_value=False)
+
+                (tmp_path / "test.db").touch()
+
+                result = cli_runner.invoke(cli, [
+                    "project", "add-clip", "123",
+                    "--drive", str(drive_path)
+                ])
+
+        assert result.exit_code == 1
+        assert "required" in result.output.lower() or "--video" in result.output or "--marker" in result.output
+
+    def test_add_clip_project_not_found(self, cli_runner, tmp_path):
+        """Adding to non-existent project fails."""
+        from broll.cli import cli
+
+        drive_path = tmp_path / "drive"
+        drive_path.mkdir()
+
+        mock_db = MagicMock()
+        mock_db.get_project.return_value = None
+
+        with patch("broll.cli.get_db_path", return_value=tmp_path / "test.db"):
+            with patch("broll.cli.Database") as MockDB:
+                MockDB.return_value.__enter__ = MagicMock(return_value=mock_db)
+                MockDB.return_value.__exit__ = MagicMock(return_value=False)
+
+                (tmp_path / "test.db").touch()
+
+                result = cli_runner.invoke(cli, [
+                    "project", "add-clip", "123",
+                    "--drive", str(drive_path),
+                    "--video", "456"
+                ])
+
+        assert result.exit_code == 1
+        assert "not found" in result.output.lower()
+
+
+class TestProjectRemoveClip:
+    """Tests for project remove-clip command."""
+
+    def test_remove_clip_success(self, cli_runner, tmp_path):
+        """Successfully remove a clip from a project."""
+        from broll.cli import cli
+
+        drive_path = tmp_path / "drive"
+        drive_path.mkdir()
+
+        mock_db = MagicMock()
+        mock_db.remove_project_clip.return_value = True
+
+        with patch("broll.cli.get_db_path", return_value=tmp_path / "test.db"):
+            with patch("broll.cli.Database") as MockDB:
+                MockDB.return_value.__enter__ = MagicMock(return_value=mock_db)
+                MockDB.return_value.__exit__ = MagicMock(return_value=False)
+
+                (tmp_path / "test.db").touch()
+
+                result = cli_runner.invoke(cli, [
+                    "project", "remove-clip", "123",
+                    "--drive", str(drive_path),
+                    "--clip-id", "456",
+                    "--yes"
+                ])
+
+        assert result.exit_code == 0
+        mock_db.remove_project_clip.assert_called_once_with(123, 456)
+        assert "Removed clip" in result.output
+
+    def test_remove_clip_not_found(self, cli_runner, tmp_path):
+        """Removing non-existent clip fails."""
+        from broll.cli import cli
+
+        drive_path = tmp_path / "drive"
+        drive_path.mkdir()
+
+        mock_db = MagicMock()
+        mock_db.remove_project_clip.return_value = False
+
+        with patch("broll.cli.get_db_path", return_value=tmp_path / "test.db"):
+            with patch("broll.cli.Database") as MockDB:
+                MockDB.return_value.__enter__ = MagicMock(return_value=mock_db)
+                MockDB.return_value.__exit__ = MagicMock(return_value=False)
+
+                (tmp_path / "test.db").touch()
+
+                result = cli_runner.invoke(cli, [
+                    "project", "remove-clip", "123",
+                    "--drive", str(drive_path),
+                    "--clip-id", "999",
+                    "--yes"
+                ])
+
+        assert result.exit_code == 1
+        assert "not found" in result.output.lower()
+
+
+class TestProjectReorder:
+    """Tests for project reorder command."""
+
+    def test_reorder_clips_success(self, cli_runner, tmp_path):
+        """Successfully reorder clips."""
+        from broll.cli import cli
+
+        drive_path = tmp_path / "drive"
+        drive_path.mkdir()
+
+        mock_db = MagicMock()
+
+        with patch("broll.cli.get_db_path", return_value=tmp_path / "test.db"):
+            with patch("broll.cli.Database") as MockDB:
+                MockDB.return_value.__enter__ = MagicMock(return_value=mock_db)
+                MockDB.return_value.__exit__ = MagicMock(return_value=False)
+
+                (tmp_path / "test.db").touch()
+
+                result = cli_runner.invoke(cli, [
+                    "project", "reorder", "123",
+                    "--drive", str(drive_path),
+                    "--clips", "5,2,8,1"
+                ])
+
+        assert result.exit_code == 0
+        mock_db.reorder_project_clips.assert_called_once_with(123, [5, 2, 8, 1])
+        assert "Reordered" in result.output
+
+    def test_reorder_invalid_clip_ids(self, cli_runner, tmp_path):
+        """Reorder with invalid clip IDs fails."""
+        from broll.cli import cli
+
+        drive_path = tmp_path / "drive"
+        drive_path.mkdir()
+
+        mock_db = MagicMock()
+
+        with patch("broll.cli.get_db_path", return_value=tmp_path / "test.db"):
+            with patch("broll.cli.Database") as MockDB:
+                MockDB.return_value.__enter__ = MagicMock(return_value=mock_db)
+                MockDB.return_value.__exit__ = MagicMock(return_value=False)
+
+                (tmp_path / "test.db").touch()
+
+                result = cli_runner.invoke(cli, [
+                    "project", "reorder", "123",
+                    "--drive", str(drive_path),
+                    "--clips", "invalid"
+                ])
+
+        assert result.exit_code == 1
+        assert "integers" in result.output.lower() or "invalid" in result.output.lower()

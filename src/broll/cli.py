@@ -1891,6 +1891,107 @@ def show(project_id: int, drive: str, output_format: str):
             click.echo()
 
 
+@project.command(name='add-clip')
+@click.argument('project_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--video', type=int, help='Video ID (for whole video)')
+@click.option('--marker', type=int, help='Video marker ID (for marked segment)')
+@click.option('--position', type=int, default=None, help='Position in sequence (default: append to end)')
+@click.option('--notes', default=None, help='Usage notes for this clip')
+def add_clip(project_id: int, drive: str, video: int | None, marker: int | None, position: int | None, notes: str | None):
+    """Add a clip to a project. Either --video or --marker is required."""
+    if not video and not marker:
+        click.echo("Error: Either --video or --marker is required.", err=True)
+        raise SystemExit(1)
+
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        # Verify project exists
+        project = db.get_project(project_id)
+        if not project:
+            click.echo(f"Project with ID {project_id} not found.", err=True)
+            raise SystemExit(1)
+
+        video_id = video
+        marker_id = None
+
+        if marker:
+            # Get video_id from the marker
+            conn = db.connect()
+            row = conn.execute(
+                "SELECT video_id FROM video_markers WHERE id = ?",
+                (marker,)
+            ).fetchone()
+            if not row:
+                click.echo(f"Marker with ID {marker} not found.", err=True)
+                raise SystemExit(1)
+            video_id = row['video_id']
+            marker_id = marker
+
+        clip_id = db.add_project_clip(
+            project_id, video_id=video_id, video_marker_id=marker_id,
+            position=position, notes=notes
+        )
+        click.echo(f"Added clip to project '{project['name']}' (clip ID: {clip_id})")
+
+
+@project.command(name='remove-clip')
+@click.argument('project_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--clip-id', required=True, type=int, help='ID of the project clip to remove')
+@click.confirmation_option(prompt='Are you sure you want to remove this clip?')
+def remove_clip(project_id: int, drive: str, clip_id: int):
+    """Remove a clip from a project."""
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        result = db.remove_project_clip(project_id, clip_id)
+        if result:
+            click.echo(f"Removed clip {clip_id} from project {project_id}")
+        else:
+            click.echo(f"Clip with ID {clip_id} not found in project {project_id}.", err=True)
+            raise SystemExit(1)
+
+
+@project.command(name='reorder')
+@click.argument('project_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--clips', required=True, help='Comma-ordered list of clip IDs (e.g., 5,2,8,1)')
+def reorder(project_id: int, drive: str, clips: str):
+    """Reorder clips in a project by providing comma-ordered clip IDs."""
+    try:
+        clip_ids = [int(x.strip()) for x in clips.split(',')]
+    except ValueError:
+        click.echo("Error: --clips must be comma-separated integers", err=True)
+        raise SystemExit(1)
+
+    if not clip_ids:
+        click.echo("Error: No clip IDs provided.", err=True)
+        raise SystemExit(1)
+
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        db.reorder_project_clips(project_id, clip_ids)
+        click.echo(f"Reordered {len(clip_ids)} clips in project {project_id}")
+
+
 # =============================================================================
 # Migrate Command
 # =============================================================================
