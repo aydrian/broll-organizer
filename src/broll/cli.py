@@ -5,6 +5,7 @@ CLI entry point for the b-roll organizer.
 from __future__ import annotations
 
 import click
+import json
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -1686,6 +1687,208 @@ def export(marker_id: int, drive: str, output: str):
         except Exception as e:
             click.echo(f"Export failed: {e}", err=True)
             raise SystemExit(1)
+
+
+# =============================================================================
+# Project Commands
+# =============================================================================
+
+@cli.group()
+def project():
+    """Manage projects (clip sequences for content creation)."""
+    pass
+
+
+@project.command()
+@click.argument('name')
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--description', default=None, help='Project description')
+@click.option('--aspect', '--aspect-ratio', default=None, type=click.Choice(['16:9', '4:3', '9:16', '1:1', '21:9'], case_sensitive=False), help='Target aspect ratio')
+@click.option('--resolution', '--output-resolution', default=None, type=click.Choice(['720p', '1080p', '4K'], case_sensitive=False), help='Target output resolution')
+@click.option('--duration', '--target-duration', type=int, default=None, help='Target duration in seconds')
+@click.option('--status', default='planning', type=click.Choice(['planning', 'gathering', 'ready', 'exported', 'published']), help='Project status')
+def create(name: str, drive: str, description: str | None, aspect: str | None, resolution: str | None, duration: int | None, status: str):
+    """Create a new project."""
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        project_id = db.create_project(
+            name=name,
+            description=description,
+            aspect_ratio=aspect,
+            target_duration_seconds=duration,
+            status=status
+        )
+        click.echo(f"Created project '{name}' (ID: {project_id})")
+
+
+@project.command()
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--status', default=None, type=click.Choice(['planning', 'gathering', 'ready', 'exported', 'published']), help='Filter by status')
+@click.option('--aspect', '--aspect-ratio', default=None, type=click.Choice(['16:9', '4:3', '9:16', '1:1', '21:9'], case_sensitive=False), help='Filter by aspect ratio')
+@click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text', help='Output format')
+def list(drive: str, status: str | None, aspect: str | None, output_format: str):
+    """List all projects with optional filters."""
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        projects = db.list_projects(status=status, aspect_ratio=aspect)
+
+        if output_format == 'json':
+            click.echo(json.dumps(projects, indent=2, default=str))
+        else:
+            if not projects:
+                click.echo("No projects found.")
+                return
+
+            click.echo(f"\nProjects ({len(projects)} total):")
+            click.echo("=" * 80)
+            click.echo(f"{'ID':<6} {'Name':<30} {'Status':<12} {'Aspect':<8} {'Duration'}")
+            click.echo("-" * 80)
+
+            for p in projects:
+                duration_str = f"{int(p['target_duration_seconds'])}s" if p.get('target_duration_seconds') else "-"
+                click.echo(
+                    f"{p['id']:<6} {p['name'][:28]:<30} {p.get('status', '-'):<12} "
+                    f"{p.get('aspect_ratio', '-'):<8} {duration_str}"
+                )
+            click.echo()
+
+
+@project.command()
+@click.argument('project_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--name', default=None, help='New project name')
+@click.option('--description', default=None, help='New description')
+@click.option('--status', default=None, type=click.Choice(['planning', 'gathering', 'ready', 'exported', 'published']), help='New status')
+@click.option('--aspect', '--aspect-ratio', default=None, type=click.Choice(['16:9', '4:3', '9:16', '1:1', '21:9'], case_sensitive=False), help='New aspect ratio')
+@click.option('--duration', '--target-duration', type=int, default=None, help='New target duration in seconds')
+def update(project_id: int, drive: str, name: str | None, description: str | None, status: str | None, aspect: str | None, duration: int | None):
+    """Update a project."""
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        project = db.get_project(project_id)
+        if not project:
+            click.echo(f"Project with ID {project_id} not found.", err=True)
+            raise SystemExit(1)
+
+        updates = {}
+        if name is not None:
+            updates['name'] = name
+        if description is not None:
+            updates['description'] = description
+        if status is not None:
+            updates['status'] = status
+        if aspect is not None:
+            updates['aspect_ratio'] = aspect
+        if duration is not None:
+            updates['target_duration_seconds'] = duration
+
+        if not updates:
+            click.echo("No updates specified. Use --name, --description, --status, --aspect, or --duration.", err=True)
+            raise SystemExit(1)
+
+        db.update_project(project_id, updates)
+        click.echo(f"Updated project {project_id}")
+
+
+@project.command()
+@click.argument('project_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.confirmation_option(prompt='Are you sure you want to delete this project?')
+def delete(project_id: int, drive: str):
+    """Delete a project and all its clips."""
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        project = db.get_project(project_id)
+        if not project:
+            click.echo(f"Project with ID {project_id} not found.", err=True)
+            raise SystemExit(1)
+
+        result = db.delete_project(project_id)
+        if result:
+            click.echo(f"Deleted project '{project['name']}' (ID: {project_id})")
+        else:
+            click.echo(f"Failed to delete project {project_id}", err=True)
+            raise SystemExit(1)
+
+
+@project.command()
+@click.argument('project_id', type=int)
+@click.option('--drive', required=True, type=click.Path(exists=True, file_okay=False), help='Path to the external drive')
+@click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text', help='Output format')
+def show(project_id: int, drive: str, output_format: str):
+    """Show project details including clips."""
+    drive_path = Path(drive)
+    db_path = get_db_path(drive_path)
+
+    if not db_path.exists():
+        click.echo("Database not found. Run 'broll init' first.", err=True)
+        raise SystemExit(1)
+
+    with Database(db_path) as db:
+        project = db.get_project(project_id)
+        if not project:
+            click.echo(f"Project with ID {project_id} not found.", err=True)
+            raise SystemExit(1)
+
+        clips = db.get_project_clips(project_id)
+
+        if output_format == 'json':
+            output = {
+                'project': project,
+                'clips': clips
+            }
+            click.echo(json.dumps(output, indent=2, default=str))
+        else:
+            click.echo(f"\nProject: {project['name']}")
+            click.echo("=" * 70)
+            click.echo(f"ID: {project['id']}")
+            if project.get('description'):
+                click.echo(f"Description: {project['description']}")
+            click.echo(f"Status: {project.get('status', '-')}")
+            click.echo(f"Aspect Ratio: {project.get('aspect_ratio', '-')}")
+            click.echo(f"Target Duration: {int(project['target_duration_seconds'])}s" if project.get('target_duration_seconds') else "Target Duration: -")
+            click.echo(f"Created: {project.get('created_at', '-')}")
+            click.echo(f"Updated: {project.get('updated_at', '-')}")
+
+            if clips:
+                click.echo(f"\nClips ({len(clips)}):")
+                click.echo("-" * 70)
+                click.echo(f"{'Pos':<4} {'Video ID':<10} {'Label':<20} {'In':<8} {'Out':<8}")
+                click.echo("-" * 70)
+                for c in clips:
+                    label = c.get('marker_label', '-') or '-'
+                    in_sec = f"{c['in_seconds']:.1f}s" if c.get('in_seconds') is not None else "-"
+                    out_sec = f"{c['out_seconds']:.1f}s" if c.get('out_seconds') is not None else "-"
+                    click.echo(
+                        f"{c['position']:<4} {c['video_id']:<10} {label[:18]:<20} {in_sec:<8} {out_sec:<8}"
+                    )
+            else:
+                click.echo("\nNo clips in this project.")
+            click.echo()
 
 
 # =============================================================================
