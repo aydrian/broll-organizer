@@ -2319,4 +2319,257 @@ def create_app(drive_path: str) -> Flask:
         else:
             return jsonify({"error": f"Unknown format: {export_format}"}), 400
 
+    # ===================================================================
+    # Project Routes
+    # ===================================================================
+
+    @app.route("/projects")
+    def projects_list_page():
+        """Render the projects list page."""
+        return render_template("projects.html")
+
+    @app.route("/projects/<int:project_id>")
+    def projects_detail_page(project_id: int):
+        """Render the project detail page."""
+        from ..db import Database
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        project = db.get_project(project_id)
+        if not project:
+            abort(404)
+
+        return render_template("project_detail.html", project=project)
+
+    @app.route("/api/projects", methods=["GET"])
+    def api_list_projects():
+        """List all projects."""
+        from ..db import Database
+
+        try:
+            db_path = current_app.config["DB_PATH"]
+            db = Database(db_path)
+
+            status = request.args.get("status")
+            aspect = request.args.get("aspect")
+
+            projects = db.list_projects(status=status, aspect_ratio=aspect)
+
+            # Add clip counts and total duration to each project
+            for project in projects:
+                clips = db.get_project_clips(project["id"])
+                project["clip_count"] = len(clips)
+                total_duration = 0
+                for clip in clips:
+                    if clip.get("video_marker_id") and clip.get("in_seconds") is not None:
+                        total_duration += clip.get("out_seconds", 0) - clip["in_seconds"]
+                    else:
+                        # For whole video clips, we'd need video duration
+                        total_duration += 0
+                project["total_duration"] = round(total_duration, 1)
+
+            return jsonify({"projects": projects})
+        except Exception as e:
+            current_app.logger.error(f"Error listing projects: {e}")
+            import traceback
+            current_app.logger.error(traceback.format_exc())
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/projects", methods=["POST"])
+    def api_create_project():
+        """Create a new project."""
+        from ..db import Database
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        name = data.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "Project name is required"}), 400
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            project_id = db.create_project(
+                name=name,
+                description=data.get("description"),
+                aspect_ratio=data.get("aspect_ratio"),
+                target_duration_seconds=data.get("target_duration_seconds"),
+                status=data.get("status", "planning")
+            )
+            return jsonify({"success": True, "project_id": project_id})
+        except Exception as e:
+            current_app.logger.error(f"Error creating project: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/projects/<int:project_id>", methods=["GET"])
+    def api_get_project(project_id: int):
+        """Get a single project with its clips."""
+        from ..db import Database
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        project = db.get_project(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        clips = db.get_project_clips(project_id)
+
+        # Add thumbnail URLs and usage info to clips
+        for clip in clips:
+            if clip.get("thumbnail_path"):
+                thumb_filename = Path(clip["thumbnail_path"]).name
+                clip["thumbnail_url"] = f"/thumbnail/{thumb_filename}"
+            else:
+                clip["thumbnail_url"] = None
+
+            # Get usage count for this clip
+            if clip.get("video_marker_id"):
+                usage_count = db.get_clip_usage_count(clip["video_id"], clip["video_marker_id"])
+            else:
+                usage_count = db.get_clip_usage_count(clip["video_id"])
+            clip["usage_count"] = usage_count
+
+        return jsonify({"project": project, "clips": clips})
+
+    @app.route("/api/projects/<int:project_id>", methods=["PUT"])
+    def api_update_project(project_id: int):
+        """Update a project."""
+        from ..db import Database
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        updates = {}
+        for field in ["name", "description", "status", "aspect_ratio", "target_duration_seconds"]:
+            if field in data:
+                updates[field] = data[field]
+
+        if not updates:
+            return jsonify({"error": "No fields to update"}), 400
+
+        try:
+            db.update_project(project_id, updates)
+            return jsonify({"success": True})
+        except Exception as e:
+            current_app.logger.error(f"Error updating project: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/projects/<int:project_id>", methods=["DELETE"])
+    def api_delete_project(project_id: int):
+        """Delete a project."""
+        from ..db import Database
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            result = db.delete_project(project_id)
+            if result:
+                return jsonify({"success": True})
+            else:
+                return jsonify({"error": "Project not found"}), 404
+        except Exception as e:
+            current_app.logger.error(f"Error deleting project: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/projects/<int:project_id>/clips", methods=["POST"])
+    def api_add_project_clip(project_id: int):
+        """Add a clip to a project."""
+        from ..db import Database
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        video_id = data.get("video_id")
+        if not video_id:
+            return jsonify({"error": "video_id is required"}), 400
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            clip_id = db.add_project_clip(
+                project_id=project_id,
+                video_id=video_id,
+                video_marker_id=data.get("video_marker_id"),
+                position=data.get("position"),
+                notes=data.get("notes")
+            )
+            return jsonify({"success": True, "clip_id": clip_id})
+        except Exception as e:
+            current_app.logger.error(f"Error adding clip to project: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/projects/<int:project_id>/clips/<int:clip_id>", methods=["DELETE"])
+    def api_remove_project_clip(project_id: int, clip_id: int):
+        """Remove a clip from a project."""
+        from ..db import Database
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            result = db.remove_project_clip(project_id, clip_id)
+            if result:
+                return jsonify({"success": True})
+            else:
+                return jsonify({"error": "Clip not found"}), 404
+        except Exception as e:
+            current_app.logger.error(f"Error removing clip from project: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/projects/<int:project_id>/reorder", methods=["POST"])
+    def api_reorder_project_clips(project_id: int):
+        """Reorder clips in a project."""
+        from ..db import Database
+
+        data = request.get_json()
+        if not data or "clip_ids" not in data:
+            return jsonify({"error": "clip_ids is required"}), 400
+
+        clip_ids = data["clip_ids"]
+        if not isinstance(clip_ids, list):
+            return jsonify({"error": "clip_ids must be an array"}), 400
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            db.reorder_project_clips(project_id, clip_ids)
+            return jsonify({"success": True})
+        except Exception as e:
+            current_app.logger.error(f"Error reordering clips: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/clip-usage/<int:video_id>")
+    def api_get_clip_usage(video_id: int):
+        """Get usage information for a clip."""
+        from ..db import Database
+
+        marker_id = request.args.get("marker_id", type=int)
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            count = db.get_clip_usage_count(video_id, marker_id)
+            usage = db.get_clip_usage(video_id, marker_id)
+            return jsonify({
+                "count": count,
+                "usage": usage
+            })
+        except Exception as e:
+            current_app.logger.error(f"Error getting clip usage: {e}")
+            return jsonify({"error": str(e)}), 500
+
     return app

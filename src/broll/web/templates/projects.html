@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+
+{% block title %}Projects - B-Roll Catalog{% endblock %}
+
+{% block content %}
+<div class="container">
+    <header class="page-header">
+        <h1>Projects</h1>
+        <button id="create-project-btn" class="btn btn-primary">+ New Project</button>
+    </header>
+
+    <div class="filters-bar">
+        <div class="filter-group">
+            <label for="status-filter">Status:</label>
+            <select id="status-filter" class="filter-select">
+                <option value="">All</option>
+                <option value="planning">Planning</option>
+                <option value="gathering">Gathering</option>
+                <option value="ready">Ready</option>
+                <option value="exported">Exported</option>
+                <option value="published">Published</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="aspect-filter">Aspect:</label>
+            <select id="aspect-filter" class="filter-select">
+                <option value="">All</option>
+                <option value="16:9">16:9 (Landscape)</option>
+                <option value="9:16">9:16 (Portrait)</option>
+                <option value="4:3">4:3</option>
+                <option value="1:1">1:1 (Square)</option>
+                <option value="21:9">21:9 (Ultrawide)</option>
+            </select>
+        </div>
+        <button id="apply-filters" class="btn btn-secondary">Apply</button>
+    </div>
+
+    <div id="projects-grid" class="projects-grid">
+        <div class="loading">Loading projects...</div>
+    </div>
+
+    <div id="empty-state" class="empty-state" style="display: none;">
+        <h3>No projects yet</h3>
+        <p>Create your first project to start organizing clips for content creation.</p>
+        <button id="create-project-btn-empty" class="btn btn-primary">Create Project</button>
+    </div>
+</div>
+
+<!-- Create Project Modal -->
+<div id="create-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <header class="modal-header">
+            <h2>Create New Project</h2>
+            <button class="close-btn">&times;</button>
+        </header>
+        <form id="create-project-form">
+            <div class="form-group">
+                <label for="project-name">Name *</label>
+                <input type="text" id="project-name" name="name" required>
+            </div>
+            <div class="form-group">
+                <label for="project-description">Description</label>
+                <textarea id="project-description" name="description" rows="3"></textarea>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="project-aspect">Aspect Ratio</label>
+                    <select id="project-aspect" name="aspect_ratio">
+                        <option value="">Select...</option>
+                        <option value="16:9">16:9 (Landscape)</option>
+                        <option value="9:16">9:16 (Portrait/Shorts)</option>
+                        <option value="4:3">4:3</option>
+                        <option value="1:1">1:1 (Square)</option>
+                        <option value="21:9">21:9 (Ultrawide)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="project-duration">Target Duration (seconds)</label>
+                    <input type="number" id="project-duration" name="target_duration_seconds" min="1">
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" id="cancel-create">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Project</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.filters-bar {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: 0.5rem;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.filter-select {
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.25rem;
+    background: var(--bg-primary);
+}
+
+.projects-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.project-card {
+    background: var(--bg-secondary);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+}
+
+.project-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.project-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 0.75rem;
+}
+
+.project-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.project-status {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.status-planning { background: #fbbf24; color: #92400e; }
+.status-gathering { background: #60a5fa; color: #1e40af; }
+.status-ready { background: #34d399; color: #065f46; }
+.status-exported { background: #a78bfa; color: #5b21b6; }
+.status-published { background: #6b7280; color: #f9fafb; }
+
+.project-meta {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.project-stats {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.875rem;
+}
+
+.stat {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.stat-icon {
+    font-size: 1rem;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-secondary);
+}
+
+.empty-state h3 {
+    margin-bottom: 0.5rem;
+}
+
+.loading {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-secondary);
+}
+
+/* Modal styles */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: var(--bg-primary);
+    border-radius: 0.5rem;
+    width: 100%;
+    max-width: 500px;
+    padding: 1.5rem;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.modal-header h2 {
+    margin: 0;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-weight: 500;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.25rem;
+    background: var(--bg-secondary);
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/projects.js"></script>
+{% endblock %}
