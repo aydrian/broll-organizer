@@ -602,10 +602,31 @@ def create_app(drive_path: str) -> Flask:
 
     @app.route("/video/<int:video_id>")
     def video_detail(video_id: int):
+        from ..db import Database
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
         video = get_video_by_id(video_id)
         if not video:
             abort(404)
-        return render_template("video_detail.html", video=video)
+
+        # Get markers with usage count
+        markers = db.get_video_markers(video_id)
+        for marker in markers:
+            usage_count = db.get_clip_usage_count(video_id, marker["id"])
+            marker["usage_count"] = usage_count
+            if usage_count == 0:
+                marker["usage_color"] = "green"
+            elif usage_count <= 2:
+                marker["usage_color"] = "yellow"
+            else:
+                marker["usage_color"] = "red"
+
+        # Get projects for add-to-project dropdown
+        projects = db.list_projects()
+
+        return render_template("video_detail.html", video=video, markers=markers, projects=projects)
 
     @app.route("/thumbnail/<file_hash>")
     def thumbnail(file_hash: str):
@@ -2570,6 +2591,49 @@ def create_app(drive_path: str) -> Flask:
             })
         except Exception as e:
             current_app.logger.error(f"Error getting clip usage: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/markers/<int:marker_id>/add-to-project", methods=["POST"])
+    def api_add_marker_to_project(marker_id: int):
+        """Add a marked clip to a project."""
+        from ..db import Database
+
+        data = request.get_json()
+        project_id = data.get("project_id")
+
+        if not project_id:
+            return jsonify({"error": "project_id required"}), 400
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            # Get video_id from marker
+            conn = db.connect()
+            row = conn.execute(
+                "SELECT video_id FROM video_markers WHERE id = ?",
+                (marker_id,)
+            ).fetchone()
+
+            if not row:
+                return jsonify({"error": "Marker not found"}), 404
+
+            video_id = row["video_id"]
+
+            # Get current clip count for position
+            clips = db.get_project_clips(project_id)
+            position = len(clips)
+
+            clip_id = db.add_project_clip(
+                project_id,
+                video_id=video_id,
+                video_marker_id=marker_id,
+                position=position
+            )
+
+            return jsonify({"success": True, "clip_id": clip_id, "position": position})
+        except Exception as e:
+            current_app.logger.error(f"Error adding marker to project: {e}")
             return jsonify({"error": str(e)}), 500
 
     return app
