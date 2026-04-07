@@ -2426,7 +2426,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
 /* ═════════════════════════════════════════════════════════════════
 
 /* ═════════════════════════════════════════════════════════════════
-   PLAYLIST PICKER MODAL
+   PROJECT PICKER MODAL
 ═════════════════════════════════════════════════════════════════ */
 
 .modal {
@@ -2462,13 +2462,13 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
     font-size: 1.1rem;
 }
 
-.playlist-options {
+.project-options {
     max-height: 200px;
     overflow-y: auto;
     margin-bottom: 1rem;
 }
 
-.playlist-option {
+.project-option {
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -2478,33 +2478,40 @@ main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
     transition: background 0.2s;
 }
 
-.playlist-option:hover {
+.project-option:hover {
     background: var(--bg-hover);
 }
 
-.playlist-option.selected {
+.project-option.selected {
     background: var(--accent);
     color: white;
 }
 
-.playlist-color {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    flex-shrink: 0;
+.project-status {
+    padding: 0.2rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    text-transform: uppercase;
 }
 
-.playlist-name {
+.status-planning { background: #fbbf24; color: #92400e; }
+.status-gathering { background: #60a5fa; color: #1e40af; }
+.status-ready { background: #34d399; color: #065f46; }
+.status-exported { background: #a78bfa; color: #5b21b6; }
+.status-published { background: #6b7280; color: #f9fafb; }
+
+.project-name {
     flex: 1;
     font-size: 0.95rem;
 }
 
-.playlist-count {
+.project-count {
     font-size: 0.8rem;
     color: var(--text-muted);
 }
 
-.playlist-option.selected .playlist-count {
+.project-option.selected .project-count {
     color: rgba(255, 255, 255, 0.8);
 }
 

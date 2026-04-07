@@ -360,9 +360,6 @@ document.addEventListener('DOMContentLoaded', () => {
         selectionCount: document.getElementById('selection-count'),
         selectAllBtn: document.getElementById('select-all-btn'),
         deselectAllBtn: document.getElementById('deselect-all-btn'),
-        playlistDropdown: document.getElementById('playlist-dropdown'),
-        playlistList: document.getElementById('playlist-list'),
-        newPlaylistName: document.getElementById('new-playlist-name'),
         // Modals
         batchLocationModal: document.getElementById('batch-location-modal'),
         batchLocationSearch: document.getElementById('batch-location-search'),
@@ -977,28 +974,28 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Multi-select toolbar button handlers
         const cancelBtn = document.getElementById('cancel-selection');
-        const addToPlaylistBtn = document.getElementById('add-to-playlist');
+        const addToProjectBtn = document.getElementById('add-to-project');
         const selectAllBtn = document.getElementById('select-all-btn');
         const deselectAllBtn = document.getElementById('deselect-all-btn');
-        
+
         const setLocationBtn = document.getElementById('set-location-btn');
-        
+
         if (cancelBtn) {
             cancelBtn.addEventListener('click', exitMultiSelectMode);
         }
-        
-        if (addToPlaylistBtn) {
-            addToPlaylistBtn.addEventListener('click', addSelectedToPlaylist);
+
+        if (addToProjectBtn) {
+            addToProjectBtn.addEventListener('click', addSelectedToProject);
         }
-        
+
         if (setLocationBtn) {
             setLocationBtn.addEventListener('click', setSelectedLocation);
         }
-        
+
         if (selectAllBtn) {
             selectAllBtn.addEventListener('click', selectAll);
         }
-        
+
         if (deselectAllBtn) {
             deselectAllBtn.addEventListener('click', deselectAll);
         }
@@ -1037,51 +1034,51 @@ document.addEventListener('DOMContentLoaded', () => {
         updateMultiSelectToolbar();
     }
     
-    async function addSelectedToPlaylist() {
+    async function addSelectedToProject() {
         const selectedIds = Array.from(state.selectedItems);
         if (selectedIds.length === 0) return;
 
-        const modal = document.getElementById('playlist-picker-modal');
-        const optionsContainer = document.getElementById('playlist-options');
-        const newNameInput = document.getElementById('new-playlist-name');
-        const confirmBtn = document.getElementById('confirm-add-to-playlist');
-        const cancelBtn = document.getElementById('cancel-playlist-picker');
+        const modal = document.getElementById('project-picker-modal');
+        const optionsContainer = document.getElementById('project-options');
+        const newNameInput = document.getElementById('new-project-name');
+        const confirmBtn = document.getElementById('confirm-add-to-project');
+        const cancelBtn = document.getElementById('cancel-project-picker');
 
-        let selectedPlaylistId = null;
+        let selectedProjectId = null;
 
-        // Load playlists
+        // Load projects
         try {
-            const response = await fetch('/api/playlists');
+            const response = await fetch('/api/projects');
             const data = await response.json();
 
-            if (!data.playlists || data.playlists.length === 0) {
-                optionsContainer.innerHTML = '<p class="text-muted">No playlists yet. Create one below.</p>';
+            if (!data.projects || data.projects.length === 0) {
+                optionsContainer.innerHTML = '<p class="text-muted">No projects yet. Create one below.</p>';
             } else {
-                optionsContainer.innerHTML = data.playlists.map(p => `
-                    <div class="playlist-option" data-id="${p.id}">
-                        <span class="playlist-color" style="background: ${p.color || '#3b82f6'}"></span>
-                        <span class="playlist-name">${escapeHtml(p.name)}</span>
-                        <span class="playlist-count">${p.video_count || 0}</span>
+                optionsContainer.innerHTML = data.projects.map(p => `
+                    <div class="project-option" data-id="${p.id}">
+                        <span class="project-status status-${p.status}">${p.status}</span>
+                        <span class="project-name">${escapeHtml(p.name)}</span>
+                        <span class="project-count">${p.clip_count || 0}</span>
                     </div>
                 `).join('');
 
-                optionsContainer.querySelectorAll('.playlist-option').forEach(opt => {
+                optionsContainer.querySelectorAll('.project-option').forEach(opt => {
                     opt.addEventListener('click', () => {
-                        optionsContainer.querySelectorAll('.playlist-option').forEach(o => o.classList.remove('selected'));
+                        optionsContainer.querySelectorAll('.project-option').forEach(o => o.classList.remove('selected'));
                         opt.classList.add('selected');
-                        selectedPlaylistId = opt.dataset.id;
+                        selectedProjectId = opt.dataset.id;
                         newNameInput.value = '';
                     });
                 });
             }
         } catch (error) {
-            optionsContainer.innerHTML = '<p class="error">Failed to load playlists</p>';
+            optionsContainer.innerHTML = '<p class="error">Failed to load projects</p>';
         }
 
         // Show modal
         modal.classList.add('show');
         newNameInput.value = '';
-        selectedPlaylistId = null;
+        selectedProjectId = null;
 
         // Cancel handler
         cancelBtn.onclick = () => {
@@ -1099,19 +1096,19 @@ document.addEventListener('DOMContentLoaded', () => {
         confirmBtn.onclick = async () => {
             const newName = newNameInput.value.trim();
 
-            if (!selectedPlaylistId && !newName) {
-                alert('Please select a playlist or enter a new name');
+            if (!selectedProjectId && !newName) {
+                alert('Please select a project or enter a new name');
                 return;
             }
 
             try {
-                const response = await fetch('/api/batch/add-to-playlist', {
+                const response = await fetch('/api/batch/add-to-project', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         video_ids: selectedIds.filter(id => !isNaN(parseInt(id))).map(id => parseInt(id)),
-                        playlist_id: selectedPlaylistId ? parseInt(selectedPlaylistId) : null,
-                        playlist_name: newName || null
+                        project_id: selectedProjectId ? parseInt(selectedProjectId) : null,
+                        project_name: newName || null
                     })
                 });
 
@@ -1119,14 +1116,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (data.success) {
                     modal.classList.remove('show');
-                    showNotification(`Added ${selectedIds.length} videos to "${newName || 'playlist'}"`);
+                    showNotification(`Added ${selectedIds.length} videos to "${newName || 'project'}"`);
                     exitMultiSelectMode();
                 } else {
-                    alert(data.error || 'Failed to add to playlist');
+                    alert(data.error || 'Failed to add to project');
                 }
             } catch (error) {
-                console.error('Error adding to playlist:', error);
-                alert('Failed to add to playlist');
+                console.error('Error adding to project:', error);
+                alert('Failed to add to project');
             }
         };
     }

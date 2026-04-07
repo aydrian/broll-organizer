@@ -2005,341 +2005,6 @@ def create_app(drive_path: str) -> Flask:
         finally:
             conn.close()
 
-    # ═════════════════════════════════════════════════════════════════
-    # Playlist Routes
-    # ═════════════════════════════════════════════════════════════════
-
-    @app.route("/playlists")
-    def playlists_page():
-        """Render the playlists list page."""
-        return render_template("playlists.html")
-
-    @app.route("/playlist/<int:playlist_id>")
-    def playlist_detail_page(playlist_id: int):
-        """Render the playlist detail page."""
-        from ..db import Database
-
-        db_path = current_app.config["DB_PATH"]
-        db = Database(db_path)
-
-        playlist = db.get_playlist(playlist_id)
-        if not playlist:
-            abort(404)
-
-        return render_template("playlist_detail.html", playlist=playlist)
-
-    @app.route("/api/playlists", methods=["GET"])
-    def api_list_playlists():
-        """List all playlists with thumbnails."""
-        from ..db import Database
-
-        try:
-            db_path = current_app.config["DB_PATH"]
-            db = Database(db_path)
-
-            playlists = db.get_all_playlists()
-
-            # Fetch thumbnails for each playlist
-            for playlist in playlists:
-                items = db.get_playlist_items(playlist["id"])
-                thumbnails = []
-                for item in items[:4]:  # Get first 4 thumbnails
-                    if item.get("thumbnail_path"):
-                        thumb_filename = Path(item["thumbnail_path"]).name
-                        thumbnails.append(f"/thumbnail/{thumb_filename}")
-                playlist["thumbnails"] = thumbnails
-
-            return jsonify({"playlists": playlists})
-        except Exception as e:
-            current_app.logger.error(f"Error listing playlists: {e}")
-            import traceback
-            current_app.logger.error(traceback.format_exc())
-            return jsonify({"error": str(e)}), 500
-
-    @app.route("/api/playlists", methods=["POST"])
-    def api_create_playlist():
-        """Create a new playlist."""
-        from ..db import Database
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        name = data.get("name", "").strip()
-        if not name:
-            return jsonify({"error": "Playlist name is required"}), 400
-
-        description = data.get("description", "").strip()
-        color = data.get("color", "#3b82f6").strip()
-
-        db_path = current_app.config["DB_PATH"]
-        db = Database(db_path)
-
-        try:
-            playlist_id = db.create_playlist(name, description or None, color)
-            return jsonify({"success": True, "playlist_id": playlist_id})
-        except Exception as e:
-            current_app.logger.error(f"Error creating playlist: {e}")
-            return jsonify({"error": str(e)}), 500
-
-    @app.route("/api/playlists/<int:playlist_id>", methods=["GET"])
-    def api_get_playlist(playlist_id: int):
-        """Get a single playlist with its videos."""
-        from ..db import Database
-
-        db_path = current_app.config["DB_PATH"]
-        db = Database(db_path)
-
-        playlist = db.get_playlist(playlist_id)
-        if not playlist:
-            return jsonify({"error": "Playlist not found"}), 404
-
-        videos = db.get_playlist_items(playlist_id)
-
-        # Add thumbnail URLs to videos
-        for video in videos:
-            if video.get("thumbnail_path"):
-                thumb_filename = Path(video["thumbnail_path"]).name
-                video["thumbnail_url"] = f"/thumbnail/{thumb_filename}"
-            else:
-                video["thumbnail_url"] = None
-
-        return jsonify({"playlist": playlist, "videos": videos})
-
-    @app.route("/api/playlists/<int:playlist_id>", methods=["PUT"])
-    def api_update_playlist(playlist_id: int):
-        """Update a playlist."""
-        from ..db import Database
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        name = data.get("name", "").strip()
-        description = data.get("description", "").strip()
-        color = data.get("color", "").strip()
-
-        if not name:
-            return jsonify({"error": "Playlist name is required"}), 400
-
-        db_path = current_app.config["DB_PATH"]
-        db = Database(db_path)
-
-        try:
-            db.update_playlist(playlist_id, name, description or None, color or None)
-            return jsonify({"success": True})
-        except Exception as e:
-            current_app.logger.error(f"Error updating playlist: {e}")
-            return jsonify({"error": str(e)}), 500
-
-    @app.route("/api/playlists/<int:playlist_id>", methods=["DELETE"])
-    def api_delete_playlist(playlist_id: int):
-        """Delete a playlist."""
-        from ..db import Database
-
-        db_path = current_app.config["DB_PATH"]
-        db = Database(db_path)
-
-        try:
-            db.delete_playlist(playlist_id)
-            return jsonify({"success": True})
-        except Exception as e:
-            current_app.logger.error(f"Error deleting playlist: {e}")
-            return jsonify({"error": str(e)}), 500
-
-    @app.route("/api/playlists/<int:playlist_id>/items/<int:video_id>", methods=["DELETE"])
-    def api_remove_from_playlist(playlist_id: int, video_id: int):
-        """Remove a video from a playlist."""
-        from ..db import Database
-
-        db_path = current_app.config["DB_PATH"]
-        db = Database(db_path)
-
-        try:
-            db.remove_video_from_playlist(playlist_id, video_id)
-            return jsonify({"success": True})
-        except Exception as e:
-            current_app.logger.error(f"Error removing video from playlist: {e}")
-            return jsonify({"error": str(e)}), 500
-
-    @app.route("/api/playlists/<int:playlist_id>/reorder", methods=["POST"])
-    def api_reorder_playlist(playlist_id: int):
-        """Reorder a video within a playlist."""
-        from ..db import Database
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        video_id = data.get("video_id")
-        new_position = data.get("new_position")
-
-        if video_id is None or new_position is None:
-            return jsonify({"error": "video_id and new_position are required"}), 400
-
-        db_path = current_app.config["DB_PATH"]
-        db = Database(db_path)
-
-        try:
-            db.reorder_playlist_item(playlist_id, video_id, new_position)
-            return jsonify({"success": True})
-        except Exception as e:
-            current_app.logger.error(f"Error reordering playlist: {e}")
-            return jsonify({"error": str(e)}), 500
-
-    @app.route("/api/batch/add-to-playlist", methods=["POST"])
-    def api_batch_add_to_playlist():
-        """Add videos to a playlist (existing or new)."""
-        from ..db import Database
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        video_ids = data.get("video_ids", [])
-        playlist_id = data.get("playlist_id")
-        playlist_name = data.get("playlist_name", "").strip()
-
-        if not video_ids:
-            return jsonify({"error": "No video IDs provided"}), 400
-
-        db_path = current_app.config["DB_PATH"]
-        db = Database(db_path)
-
-        try:
-            # Create new playlist if name provided
-            if not playlist_id and playlist_name:
-                playlist_id = db.create_playlist(playlist_name)
-            elif not playlist_id:
-                return jsonify({"error": "playlist_id or playlist_name is required"}), 400
-
-            # Add each video
-            added = 0
-            for video_id in video_ids:
-                if db.add_video_to_playlist(playlist_id, video_id):
-                    added += 1
-
-            return jsonify({"success": True, "added": added, "playlist_id": playlist_id})
-        except Exception as e:
-            current_app.logger.error(f"Error adding to playlist: {e}")
-            return jsonify({"error": str(e)}), 500
-
-    @app.route("/api/playlists/<int:playlist_id>/export", methods=["GET"])
-    def api_export_playlist(playlist_id: int):
-        """Export playlist to various formats (json, csv, fcpxml)."""
-        import csv
-        import io
-        from datetime import datetime
-
-        from ..db import Database
-
-        export_format = request.args.get("format", "json").lower()
-
-        db_path = current_app.config["DB_PATH"]
-        db = Database(db_path)
-
-        playlist = db.get_playlist(playlist_id)
-        if not playlist:
-            return jsonify({"error": "Playlist not found"}), 404
-
-        videos = db.get_playlist_items(playlist_id)
-
-        if export_format == "json":
-            return jsonify({
-                "playlist": playlist,
-                "videos": videos,
-                "exported_at": datetime.now().isoformat()
-            })
-
-        elif export_format == "csv":
-            output = io.StringIO()
-            writer = csv.writer(output)
-
-            # Header
-            writer.writerow([
-                "id", "file_name", "file_path", "duration_seconds",
-                "resolution", "scene_description", "gps_location_name"
-            ])
-
-            # Data rows
-            for video in videos:
-                writer.writerow([
-                    video.get("id"),
-                    video.get("file_name", ""),
-                    video.get("file_path", ""),
-                    video.get("duration_seconds", ""),
-                    video.get("resolution", ""),
-                    video.get("scene_description", ""),
-                    video.get("gps_location_name", "")
-                ])
-
-            output.seek(0)
-            return send_file(
-                io.BytesIO(output.getvalue().encode("utf-8")),
-                mimetype="text/csv",
-                as_attachment=True,
-                download_name=f"{playlist['name']}.csv"
-            )
-
-        elif export_format == "fcpxml":
-            # Generate basic FCPXML for Final Cut Pro
-            # This is a simplified version - full implementation would need proper timing
-            drive_path = current_app.config["DRIVE_PATH"]
-
-            xml_parts = [
-                '<?xml version="1.0" encoding="UTF-8"?>',
-                '<fcpxml version="1.9">',
-                '  <resources>',
-                '    <format id="r1" name="FFVideoFormat1080p30" width="1920" height="1080" frameDuration="1/30s"/>',
-            ]
-
-            # Add format resources for each unique resolution
-            formats_added = 0
-            for i, video in enumerate(videos):
-                res = video.get("resolution", "")
-                if "x" in str(res):
-                    try:
-                        w, h = map(int, res.split("x"))
-                        xml_parts.append(f'    <format id="r{i+2}" name="Custom{w}x{h}" width="{w}" height="{h}" frameDuration="1/30s"/>')
-                        formats_added += 1
-                    except ValueError:
-                        pass
-
-            xml_parts.append('  </resources>')
-            xml_parts.append('  <library>')
-            xml_parts.append('    <event name="{}">'.format(playlist["name"]))
-            xml_parts.append('      <project name="{}">'.format(playlist["name"]))
-            xml_parts.append('        <sequence format-ref="r1">')
-            xml_parts.append('          <spine>')
-
-            # Add clip references
-            for i, video in enumerate(videos):
-                file_path = video.get("file_path", "")
-                file_name = video.get("file_name", "")
-                duration = video.get("duration_seconds", 0) or 1
-
-                xml_parts.append(f'            <clip name="{file_name}" duration="{duration}s">')
-                xml_parts.append(f'              <note>{video.get("scene_description", "")}</note>')
-                xml_parts.append('            </clip>')
-
-            xml_parts.append('          </spine>')
-            xml_parts.append('        </sequence>')
-            xml_parts.append('      </project>')
-            xml_parts.append('    </event>')
-            xml_parts.append('  </library>')
-            xml_parts.append('</fcpxml>')
-
-            xml_content = "\\n".join(xml_parts)
-            return send_file(
-                io.BytesIO(xml_content.encode("utf-8")),
-                mimetype="text/xml",
-                as_attachment=True,
-                download_name=f"{playlist['name']}.fcpxml"
-            )
-
-        else:
-            return jsonify({"error": f"Unknown format: {export_format}"}), 400
-
     # ===================================================================
     # Project Routes
     # ===================================================================
@@ -2634,6 +2299,59 @@ def create_app(drive_path: str) -> Flask:
             return jsonify({"success": True, "clip_id": clip_id, "position": position})
         except Exception as e:
             current_app.logger.error(f"Error adding marker to project: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/batch/add-to-project", methods=["POST"])
+    def api_batch_add_to_project():
+        """Add videos to a project (existing or new)."""
+        from ..db import Database
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        video_ids = data.get("video_ids", [])
+        project_id = data.get("project_id")
+        project_name = data.get("project_name", "").strip()
+
+        if not video_ids:
+            return jsonify({"error": "No video IDs provided"}), 400
+
+        db_path = current_app.config["DB_PATH"]
+        db = Database(db_path)
+
+        try:
+            # Create new project if name provided
+            if not project_id and project_name:
+                project_id = db.create_project(
+                    name=project_name,
+                    description=None,
+                    aspect_ratio=None,
+                    output_resolution=None,
+                    target_duration_seconds=None
+                )
+            elif not project_id:
+                return jsonify({"error": "project_id or project_name is required"}), 400
+
+            # Add each video as a clip
+            added = 0
+            for video_id in video_ids:
+                # Get current clip count for position
+                clips = db.get_project_clips(project_id)
+                position = len(clips)
+
+                result = db.add_project_clip(
+                    project_id=project_id,
+                    video_id=video_id,
+                    video_marker_id=None,
+                    position=position
+                )
+                if result:
+                    added += 1
+
+            return jsonify({"success": True, "added": added, "project_id": project_id})
+        except Exception as e:
+            current_app.logger.error(f"Error adding to project: {e}")
             return jsonify({"error": str(e)}), 500
 
     return app

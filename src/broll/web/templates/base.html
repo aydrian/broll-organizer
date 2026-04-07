@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
     {% block head %}{% endblock %}
+    {% block extra_css %}{% endblock %}
 </head>
 <body>
     <a href="#content" class="skip-link">Skip to main content</a>
@@ -15,7 +16,7 @@
         <div class="nav-links">
             <a href="/" class="{% if request.endpoint == 'browse' %}active{% endif %}" aria-current="{% if request.endpoint == 'browse' %}page{% endif %}">Browse</a>
             <a href="/search" class="{% if request.endpoint == 'search_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'search_page' %}page{% endif %}">Search</a>
-            <a href="/playlists" class="{% if request.endpoint == 'playlists' or request.endpoint == 'playlist_detail' %}active{% endif %}" aria-current="{% if request.endpoint == 'playlists' or request.endpoint == 'playlist_detail' %}page{% endif %}">Playlists</a>
+            <a href="/projects" class="{% if request.endpoint == 'projects_list_page' or request.endpoint == 'projects_detail_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'projects_list_page' or request.endpoint == 'projects_detail_page' %}page{% endif %}">Projects</a>
             <a href="/timeline" class="{% if request.endpoint == 'timeline_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'timeline_page' %}page{% endif %}">Timeline</a>
             <a href="/map" class="{% if request.endpoint == 'map_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'map_page' %}page{% endif %}">Map</a>
             <a href="/stats" class="{% if request.endpoint == 'stats_page' %}active{% endif %}" aria-current="{% if request.endpoint == 'stats_page' %}page{% endif %}">Stats</a>
@@ -36,9 +37,9 @@
                 <span class="bottom-nav-icon" aria-hidden="true">🔍</span>
                 <span class="bottom-nav-label">Search</span>
             </a>
-            <a href="/playlists" class="bottom-nav-item {% if request.endpoint == 'playlists' %}active{% endif %}" aria-label="Playlists">
-                <span class="bottom-nav-icon" aria-hidden="true">📋</span>
-                <span class="bottom-nav-label">Lists</span>
+            <a href="/projects" class="bottom-nav-item {% if request.endpoint == 'projects_list_page' or request.endpoint == 'projects_detail_page' %}active{% endif %}" aria-label="Projects">
+                <span class="bottom-nav-icon" aria-hidden="true">🎯</span>
+                <span class="bottom-nav-label">Projects</span>
             </a>
             <a href="/timeline" class="bottom-nav-item {% if request.endpoint == 'timeline_page' %}active{% endif %}" aria-label="Timeline view">
                 <span class="bottom-nav-icon" aria-hidden="true">📅</span>
@@ -59,5 +60,6 @@
         {% block content %}{% endblock %}
     </main>
     {% block scripts %}{% endblock %}
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -45,31 +45,31 @@
             <button type="button" class="multi-select-btn secondary" id="cancel-selection" aria-label="Cancel selection">
                 Cancel
             </button>
+            <button type="button" class="multi-select-btn" id="add-to-project" aria-label="Add selected to project">
+                <span aria-hidden="true">+</span> Project
+            </button>
             <button type="button" class="multi-select-btn" id="set-location-btn" aria-label="Set location for selected">
                 📍 Location
             </button>
-            <button type="button" class="multi-select-btn" id="add-to-playlist" aria-label="Add selected to playlist">
-                <span aria-hidden="true">+</span> Playlist
-            </button>
         </div>
     </div>
-    
-    <!-- Playlist Picker Modal -->
-    <div class="modal" id="playlist-picker-modal" role="dialog" aria-modal="true" aria-label="Add to playlist">
+
+    <!-- Project Picker Modal -->
+    <div class="modal" id="project-picker-modal" role="dialog" aria-modal="true" aria-label="Add to project">
         <div class="modal-content">
-            <h3>Add to Playlist</h3>
-            <div id="playlist-options" class="playlist-options">
-                <p class="text-muted">Loading playlists...</p>
+            <h3>Add to Project</h3>
+            <div id="project-options" class="project-options">
+                <p class="text-muted">Loading projects...</p>
             </div>
             <div class="modal-divider">or create new</div>
-            <input type="text" id="new-playlist-name" class="modal-input" placeholder="New playlist name...">
+            <input type="text" id="new-project-name" class="modal-input" placeholder="New project name...">
             <div class="modal-actions">
-                <button type="button" class="btn secondary" id="cancel-playlist-picker">Cancel</button>
-                <button type="button" class="btn" id="confirm-add-to-playlist">Add</button>
+                <button type="button" class="btn secondary" id="cancel-project-picker">Cancel</button>
+                <button type="button" class="btn" id="confirm-add-to-project">Add</button>
             </div>
         </div>
     </div>
-    
+
     {{ location_picker_modal() }}
 {% endblock %}
 
