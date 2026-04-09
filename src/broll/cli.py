@@ -125,21 +125,27 @@ def init(drive_path: str):
     '--scan-only', is_flag=True,
     help='Only scan and extract metadata - skip LLM analysis and embeddings',
 )
-def process(drive_path: str, force: bool, scan_only: bool):
-    '''Scan and process new videos on the drive.'''
+@click.option(
+    '--concurrency', type=int, default=5,
+    help='Number of videos to process in parallel (default: 5)'
+)
+@click.option(
+    '--transcribe/--no-transcribe', default=True,
+    help='Enable/disable audio transcription (default: enabled)'
+)
+def process(drive_path: str, force: bool, scan_only: bool, concurrency: int, transcribe: bool):
+    '''Scan and process new videos on the drive with parallel processing.'''
+    import asyncio
     from tqdm import tqdm
     from .scanner import scan_drive
-    from .metadata import extract_all_metadata
-    from .frames import extract_keyframes
-    from .analyzer import analyze_frames
-    from .embeddings import generate_embedding, build_searchable_text
+    from .transcription import is_whisper_available, get_transcription_info
 
     drive = Path(drive_path)
     db_path = get_db_path(drive)
     thumbs_dir = get_thumbs_dir(drive)
 
     if not db_path.exists():
-        click.echo('Database not found. Run &#x27;broll init&#x27; first.')
+        click.echo('Database not found. Run "broll init" first.')
         raise SystemExit(1)
 
     thumbs_dir.mkdir(parents=True, exist_ok=True)
@@ -171,116 +177,243 @@ def process(drive_path: str, force: bool, scan_only: bool):
         if lrf_count:
             click.echo(f'   {lrf_count} file(s) have LRF previews (will use for faster analysis)')
 
+        # Show transcription status
+        if transcribe and not scan_only:
+            if is_whisper_available():
+                info = get_transcription_info()
+                click.echo(f"   Transcription: enabled (model: {info['default_model']})")
+            else:
+                click.echo("   Transcription: whisper.cpp not found (install for audio search)")
+
         if scan_only:
             click.echo(f'\n   Running in --scan-only mode (metadata only, no LLM)\n')
         else:
-            click.echo()
+            click.echo(f'\n   Processing with concurrency={concurrency}\n')
 
-        processed = 0
-        errors = 0
+        # Run async processing
+        asyncio.run(_run_processing(
+            new_files=new_files,
+            db_path=db_path,
+            drive_path=drive,
+            thumbs_dir=thumbs_dir,
+            scan_only=scan_only,
+            transcribe=transcribe and not scan_only,
+            concurrency=concurrency,
+            total_existing=total_existing,
+        ))
 
-        desc = 'Extracting metadata' if scan_only else 'Processing videos'
-        for video_info in tqdm(new_files, desc=desc, unit='file'):
+
+async def _run_processing(
+    new_files: list[dict],
+    db_path: Path,
+    drive_path: Path,
+    thumbs_dir: Path,
+    scan_only: bool,
+    transcribe: bool,
+    concurrency: int,
+    total_existing: int,
+):
+    """Run video processing with controlled concurrency using semaphore."""
+    import asyncio
+    from tqdm.asyncio import tqdm_asyncio
+
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def process_with_limit(video_info: dict) -> tuple[bool, dict]:
+        """Process a single video with semaphore-controlled concurrency."""
+        async with semaphore:
+            return await _process_single_video(
+                video_info,
+                db_path,
+                drive_path,
+                thumbs_dir,
+                scan_only,
+                transcribe,
+            )
+
+    # Create tasks for all videos
+    tasks = [process_with_limit(v) for v in new_files]
+
+    # Run all tasks with progress bar
+    results = await tqdm_asyncio.gather(*tasks, desc='Processing videos', unit='video')
+
+    # Calculate stats
+    processed = sum(1 for success, _ in results if success)
+    errors = sum(1 for success, _ in results if not success)
+
+    # Summary
+    click.echo(f'\n{"-" * 50}')
+    click.echo(f'Processing complete!')
+    click.echo(f'   Processed: {processed}')
+    if errors:
+        click.echo(f'   Errors: {errors}')
+    click.echo(f'   Total in catalog: {total_existing + processed}')
+
+    if scan_only:
+        click.echo(
+            f'\n   Metadata only (--scan-only). '
+            f'Run without the flag for full LLM analysis.'
+        )
+    else:
+        if processed > 0:
+            click.echo(f'\nSample results:\n')
+            successful_videos = [v for success, v in results if success and v.get('scene_description')]
+            _print_analyzed_samples(successful_videos[:3])
+
+
+async def _process_single_video(
+    video_info: dict,
+    db_path: Path,
+    drive_path: Path,
+    thumbs_dir: Path,
+    scan_only: bool,
+    transcribe: bool,
+) -> tuple[bool, dict]:
+    """
+    Process a single video end-to-end (metadata, frames, analysis, transcription, embedding, DB).
+
+    Returns:
+        Tuple of (success: bool, video_info: dict)
+    """
+    import asyncio
+    from .metadata import extract_all_metadata
+    from .frames import extract_keyframes, extract_keyframes_optimized
+    from .analyzer import analyze_frames_async
+    from .embeddings import generate_embeddings_batch, build_searchable_text
+    from .transcription import is_whisper_available, transcribe_video_async
+    from .proxy import generate_proxy, get_proxy_path
+    from tqdm import tqdm
+
+    try:
+        # Step 1: Extract metadata (always - synchronous I/O bound)
+        metadata = await asyncio.to_thread(
+            extract_all_metadata,
+            video_info['absolute_path']
+        )
+        video_info.update(metadata)
+
+        # Set location_source based on GPS availability
+        if video_info.get('gps_latitude') is not None and video_info.get('gps_longitude') is not None:
+            video_info['location_source'] = 'gps'
+        else:
+            video_info['location_source'] = 'folder'
+
+        if not scan_only:
+            # Step 2: Extract keyframes (try optimized first, fallback to original)
+            tqdm.write(f"  Extracting frames: {video_info['file_name']}")
             try:
-                # Step 1: Extract metadata (always)
-                metadata = extract_all_metadata(video_info['absolute_path'])
-                video_info.update(metadata)
+                keyframes = await asyncio.to_thread(
+                    extract_keyframes_optimized,
+                    video_info,
+                    thumb_dir=str(thumbs_dir),
+                )
+            except Exception:
+                # Fallback to original method
+                keyframes = await asyncio.to_thread(
+                    extract_keyframes,
+                    video_info,
+                    thumb_dir=str(thumbs_dir),
+                )
 
-                # Set location_source based on GPS availability
+            # Step 3: LLM vision analysis (async with connection pooling)
+            tqdm.write(f"  Analyzing with {_get_vision_model_name()}...")
+            analysis = await analyze_frames_async(keyframes)
+            video_info.update(analysis)
+
+            # Step 4: Audio transcription (async, local whisper.cpp)
+            transcript_text = None
+            if transcribe and is_whisper_available():
+                tqdm.write(f"  Transcribing audio: {video_info['file_name']}")
+                transcript_result = await transcribe_video_async(
+                    video_info['absolute_path']
+                )
+                if transcript_result:
+                    transcript_text = transcript_result['transcript']
+                    video_info['transcript'] = transcript_text
+                    video_info['transcript_model'] = transcript_result['model']
+
+            # Step 5: Generate embedding (includes transcript if available)
+            search_text = build_searchable_text(video_info, include_transcript=True)
+            if search_text.strip():
+                tqdm.write(f"  Generating embedding...")
+                # Use batch endpoint (single item batch for now)
+                embeddings = await generate_embeddings_batch([search_text])
+                if embeddings and embeddings[0]:
+                    video_info['embedding'] = embeddings[0]
+        else:
+            # Scan-only: set empty fields
+            video_info['scene_description'] = None
+            video_info['tags'] = None
+            video_info['mood'] = None
+            video_info['camera_movement'] = None
+            video_info['time_of_day'] = None
+            video_info['thumbnail_path'] = None
+            video_info['transcript'] = None
+            video_info['transcript_model'] = None
+
+        # Step 6: Save to database (synchronous)
+        video_info['processed_at'] = datetime.now(timezone.utc).isoformat()
+        video_id = await asyncio.to_thread(_insert_video_sync, db_path, video_info)
+
+        # Step 7: Generate proxy for smooth web playback (async background)
+        if video_id:
+            proxy_path = get_proxy_path(video_info['file_hash'], drive_path)
+            if not proxy_path.exists():
+                tqdm.write(f"  Generating proxy: {video_info['file_name']}")
+                success = await asyncio.to_thread(
+                    generate_proxy,
+                    Path(video_info['absolute_path']),
+                    proxy_path,
+                    target_height=480,
+                    crf=28,
+                )
+                if success:
+                    await asyncio.to_thread(
+                        _update_video_proxy_sync,
+                        db_path,
+                        video_info['relative_path'],
+                        str(proxy_path)
+                    )
+
+        return True, video_info
+
+    except Exception as e:
+        tqdm.write(f"  Error processing {video_info['file_name']}: {e}")
+
+        # Still catalog the file with metadata so we don't retry it every time
+        try:
+            video_info["scene_description"] = "ERROR: Could not process video - file may be corrupted or incomplete"
+            video_info["tags"] = None
+            video_info["mood"] = None
+            video_info["camera_movement"] = None
+            video_info["time_of_day"] = None
+            video_info["thumbnail_path"] = None
+            video_info['transcript'] = None
+            video_info['transcript_model'] = None
+            video_info["processed_at"] = datetime.now(timezone.utc).isoformat()
+            # Ensure location_source is set even on error
+            if "location_source" not in video_info:
                 if video_info.get('gps_latitude') is not None and video_info.get('gps_longitude') is not None:
                     video_info['location_source'] = 'gps'
                 else:
                     video_info['location_source'] = 'folder'
+            await asyncio.to_thread(_insert_video_sync, db_path, video_info)
+        except Exception:
+            pass
 
-                if not scan_only:
-                    # Step 2: Extract keyframes
-                    tqdm.write(f'  Extracting frames: {video_info['file_name']}')
-                    keyframes = extract_keyframes(
-                        video_info,
-                        thumb_dir=str(thumbs_dir),
-                    )
+        return False, video_info
 
-                    # Step 3: LLM vision analysis
-                    tqdm.write(f'  Analyzing with {_get_vision_model_name()}...')
-                    analysis = analyze_frames(keyframes)
-                    video_info.update(analysis)
 
-                    # Step 4: Generate embedding
-                    search_text = build_searchable_text(video_info)
-                    if search_text.strip():
-                        tqdm.write(f'  Generating embedding...')
-                        embedding = generate_embedding(search_text)
-                        video_info['embedding'] = embedding
-                else:
-                    video_info['scene_description'] = None
-                    video_info['tags'] = None
-                    video_info['mood'] = None
-                    video_info['camera_movement'] = None
-                    video_info['time_of_day'] = None
-                    video_info['thumbnail_path'] = None
+def _insert_video_sync(db_path: Path, video_info: dict) -> int:
+    """Synchronous wrapper for database insert (called via asyncio.to_thread)."""
+    with Database(db_path) as db:
+        return db.insert_video(video_info)
 
-                # Step 5: Save to database
-                video_info['processed_at'] = datetime.now(timezone.utc).isoformat()
-                video_id = db.insert_video(video_info)
-                processed += 1
 
-                # Step 6: Generate proxy for smooth web playback
-                if video_id:
-                    from .proxy import generate_proxy, get_proxy_path
-                    proxy_path = get_proxy_path(video_info['file_hash'], drive)
-                    if not proxy_path.exists():
-                        tqdm.write(f'  Generating proxy: {video_info["file_name"]}')
-                        success = generate_proxy(
-                            Path(video_info['absolute_path']),
-                            proxy_path,
-                            target_height=480,
-                            crf=28,
-                        )
-                        if success:
-                            db.update_video(video_info['relative_path'], {'proxy_path': str(proxy_path)})
-
-            except Exception as e:
-                tqdm.write(f"  Error processing {video_info['file_name']}: {e}")
-
-                # Still catalog the file with metadata so we don't retry it every time
-                try:
-                    video_info["scene_description"] = "ERROR: Could not process video - file may be corrupted or incomplete"
-                    video_info["tags"] = None
-                    video_info["mood"] = None
-                    video_info["camera_movement"] = None
-                    video_info["time_of_day"] = None
-                    video_info["thumbnail_path"] = None
-                    video_info["processed_at"] = datetime.now(timezone.utc).isoformat()
-                    # Ensure location_source is set even on error
-                    if "location_source" not in video_info:
-                        if video_info.get('gps_latitude') is not None and video_info.get('gps_longitude') is not None:
-                            video_info['location_source'] = 'gps'
-                        else:
-                            video_info['location_source'] = 'folder'
-                    db.insert_video(video_info)
-                except Exception:
-                    pass
-
-                errors += 1
-                continue
-
-        # Summary
-        click.echo(f'\n{'-' * 50}')
-        click.echo(f'Processing complete!')
-        click.echo(f'   Processed: {processed}')
-        if errors:
-            click.echo(f'   Errors: {errors}')
-        click.echo(f'   Total in catalog: {total_existing + processed}')
-
-        if scan_only:
-            click.echo(
-                f'\n   Metadata only (--scan-only). '
-                f'Run without the flag for full LLM analysis.'
-            )
-        else:
-            if processed > 0:
-                click.echo(f'\nSample results:\n')
-                _print_analyzed_samples(new_files[:3])
+def _update_video_proxy_sync(db_path: Path, file_path: str, proxy_path: str):
+    """Synchronous wrapper for proxy path update."""
+    with Database(db_path) as db:
+        db.update_video(file_path, {'proxy_path': proxy_path})
 
 
 def _get_vision_model_name() -> str:
@@ -330,6 +463,133 @@ def _print_analyzed_samples(videos: list[dict]):
                 click.echo(f"      Tags: {tags}")
         click.echo(f'      Mood: {mood} | Movement: {movement} | Time: {time_of_day}')
         click.echo()
+
+
+@cli.command(name='transcribe')
+@click.argument('drive_path', type=click.Path(exists=True, file_okay=False))
+@click.option('--video-id', type=int, help='Transcribe specific video by ID')
+@click.option('--force', is_flag=True, help='Re-transcribe videos that already have transcripts')
+@click.option('--model', default=None, help='Whisper model (tiny, base, small, medium)')
+@click.option('--batch-size', default=1, help='Number of videos to transcribe concurrently (default: 1)')
+@click.option('--limit', type=int, default=None, help='Limit number of videos to process')
+def transcribe_command(
+    drive_path: str,
+    video_id: int | None,
+    force: bool,
+    model: str | None,
+    batch_size: int,
+    limit: int | None
+):
+    '''Transcribe audio for videos missing transcripts.'''
+    import asyncio
+    from tqdm import tqdm
+    from .transcription import (
+        is_whisper_available,
+        transcribe_video_async,
+        get_default_whisper_model,
+        get_transcription_info,
+    )
+
+    drive = Path(drive_path)
+    db_path = get_db_path(drive)
+
+    if not db_path.exists():
+        click.echo('Database not found. Run "broll init" first.')
+        raise SystemExit(1)
+
+    # Check if whisper.cpp is available
+    if not is_whisper_available():
+        click.echo(
+            'Transcription not available: whisper.cpp not found.\n'
+            'Install from: https://github.com/ggerganov/whisper.cpp\n'
+            'Examples:\n'
+            '  macOS: brew install whisper.cpp\n'
+            '  Build: cmake -B build && cmake --build build --config Release'
+        )
+        raise SystemExit(1)
+
+    # Show info
+    info = get_transcription_info()
+    whisper_model = model or get_default_whisper_model()
+    click.echo(f"Using whisper.cpp model: {whisper_model}")
+    click.echo(f"Platform: {info['platform_type']}")
+    if info['macos_metal']:
+        click.echo("GPU acceleration: Metal enabled")
+    click.echo()
+
+    with Database(db_path) as db:
+        # Find videos to transcribe
+        if video_id:
+            video = db.get_video_by_id(video_id)
+            if not video:
+                click.echo(f'Video ID {video_id} not found.')
+                raise SystemExit(1)
+            videos = [video]
+        else:
+            if force:
+                # Get all videos (transcribed or not)
+                videos = db.get_all_videos(limit=limit or 10000)
+                # Filter out those with errors
+                videos = [v for v in videos if not v.get('scene_description', '').startswith('ERROR')]
+            else:
+                videos = db.get_videos_missing_transcript(limit=limit or 10000)
+
+        if not videos:
+            click.echo('No videos found needing transcription.')
+            return
+
+        click.echo(f'Found {len(videos)} video(s) to transcribe\n')
+
+        # Run transcription
+        asyncio.run(_run_transcription_batch(
+            videos=videos,
+            db_path=db_path,
+            model=whisper_model,
+            concurrency=batch_size,
+        ))
+
+        click.echo(f'\n{"-" * 50}')
+        click.echo('Transcription complete!')
+
+
+async def _run_transcription_batch(
+    videos: list[dict],
+    db_path: Path,
+    model: str,
+    concurrency: int,
+):
+    """Run transcription on multiple videos with controlled concurrency."""
+    import asyncio
+    from tqdm.asyncio import tqdm_asyncio
+    from .transcription import transcribe_video_async
+    from .db import Database
+
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def transcribe_one(video: dict) -> tuple[int, dict | None]:
+        async with semaphore:
+            result = await transcribe_video_async(
+                video['file_path'],
+                model=model,
+            )
+            return video['id'], result
+
+    tasks = [transcribe_one(v) for v in videos]
+    results = await tqdm_asyncio.gather(*tasks, desc='Transcribing videos', unit='video')
+
+    # Update database with results
+    success_count = 0
+    with Database(db_path) as db:
+        for video_id, result in results:
+            if result and result.get('transcript'):
+                db.update_video_transcript(
+                    video_id,
+                    result['transcript'],
+                    result['model']
+                )
+                success_count += 1
+
+    click.echo(f'\n   Successfully transcribed: {success_count}/{len(videos)}')
 
 
 # Resolution name to minimum width mapping

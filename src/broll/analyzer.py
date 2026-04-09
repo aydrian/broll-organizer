@@ -283,3 +283,99 @@ def _empty_analysis() -> dict:
         "camera_movement": "unknown",
         "time_of_day": "unknown",
     }
+
+
+# ---- Async versions for parallel processing ----
+
+async def analyze_frames_async(keyframes: list[bytes]) -> dict:
+    """
+    Async version of analyze_frames for concurrent processing.
+
+    Uses httpx.AsyncClient for Fireworks (connection pooling)
+    or asyncio.to_thread for Ollama.
+
+    Args:
+        keyframes: List of JPEG image bytes (keyframes from a video).
+
+    Returns:
+        Dict with: scene_description, tags, mood, camera_movement, time_of_day
+    """
+    import asyncio
+
+    from .clients import get_async_http_client
+    from .config import VISION_PROVIDER
+
+    if VISION_PROVIDER == "fireworks":
+        return await _analyze_with_fireworks_async(keyframes)
+    else:
+        # Run Ollama in thread pool since it's synchronous
+        return await asyncio.to_thread(_analyze_with_ollama, keyframes)
+
+
+async def _analyze_with_fireworks_async(keyframes: list[bytes]) -> dict:
+    """
+    Analyze frames using Fireworks AI Kimi K2.5 Turbo (async with connection pooling).
+    """
+    import asyncio
+
+    from .clients import get_async_http_client
+
+    client = get_async_http_client()
+
+    # Validate and resize images if needed before encoding
+    validated_frames = [
+        await asyncio.to_thread(_validate_and_resize_image, frame)
+        for frame in keyframes
+    ]
+
+    # Encode images as base64 data URIs
+    images_b64 = [base64.b64encode(frame).decode("utf-8") for frame in validated_frames]
+    image_data_uris = [f"data:image/jpeg;base64,{b64}" for b64 in images_b64]
+
+    # Build message content with images
+    content = [{"type": "text", "text": ANALYSIS_PROMPT}]
+    for img_uri in image_data_uris:
+        content.append({"type": "image_url", "image_url": {"url": img_uri}})
+
+    # Get API key from environment
+    api_key = os.environ.get("FIREWORKS_API_KEY")
+    if not api_key:
+        print("  Warning: FIREWORKS_API_KEY not set")
+        return _empty_analysis()
+
+    # Retry logic for resilience
+    max_retries = 3
+    base_delay = 1.0
+
+    for attempt in range(max_retries):
+        try:
+            response = await client.post(
+                "https://api.fireworks.ai/inference/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": FIREWORKS_VISION_MODEL,
+                    "messages": [{"role": "user", "content": content}],
+                    "temperature": 0.3,
+                    "max_tokens": 1024,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            message_content = data["choices"][0]["message"]["content"]
+            if message_content:
+                return _parse_llm_response(message_content)
+            return _empty_analysis()
+
+        except Exception as e:
+            if attempt == max_retries - 1:
+                print(f"  Warning: Fireworks API error after {max_retries} retries: {e}")
+                return _empty_analysis()
+
+            # Exponential backoff
+            delay = base_delay * (2 ** attempt)
+            await asyncio.sleep(delay)

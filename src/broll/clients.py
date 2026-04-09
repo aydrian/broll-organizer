@@ -10,7 +10,7 @@ import os
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from .config import AI_PROVIDER
+from .config import AI_PROVIDER, VISION_PROVIDER, EMBEDDING_PROVIDER
 
 if TYPE_CHECKING:
     pass
@@ -93,7 +93,7 @@ def get_ai_client(provider: str | None = None):
 def check_ai_availability() -> dict[str, bool]:
     """
     Check which AI providers are available.
-    
+
     Returns:
         Dict with availability status for each provider.
     """
@@ -101,3 +101,59 @@ def check_ai_availability() -> dict[str, bool]:
         "fireworks": get_fireworks_client() is not None,
         "ollama": get_ollama_client() is not None,
     }
+
+
+# ---- Async HTTP Client for Connection Pooling ----
+
+@lru_cache(maxsize=1)
+def get_async_http_client() -> "httpx.AsyncClient":
+    """
+    Get or create a cached async HTTP client with connection pooling.
+
+    Uses httpx.AsyncClient with configured limits for efficient
+    connection reuse across concurrent API calls.
+
+    Returns:
+        httpx.AsyncClient instance with connection pooling.
+    """
+    import httpx
+
+    limits = httpx.Limits(
+        max_connections=20,
+        max_keepalive_connections=10,
+        keepalive_expiry=60.0
+    )
+    return httpx.AsyncClient(
+        limits=limits,
+        timeout=httpx.Timeout(60.0, connect=10.0),
+        http2=True
+    )
+
+
+async def close_async_http_client():
+    """Close the async HTTP client (for cleanup on shutdown)."""
+    client = get_async_http_client()
+    await client.aclose()
+    # Clear the cache so a new client will be created if needed
+    get_async_http_client.cache_clear()
+
+
+def get_provider_for_task(task: str) -> str:
+    """
+    Get the appropriate provider for a specific task.
+
+    Args:
+        task: The task type ("vision", "embedding", "chat")
+
+    Returns:
+        Provider name ("fireworks" or "ollama")
+    """
+    if task == "vision":
+        return VISION_PROVIDER
+    elif task == "embedding":
+        return EMBEDDING_PROVIDER
+    elif task == "chat":
+        # Chat uses same provider as vision for consistency
+        return VISION_PROVIDER
+    else:
+        return AI_PROVIDER

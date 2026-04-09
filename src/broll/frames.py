@@ -128,6 +128,125 @@ def extract_keyframes(
     return frames
 
 
+def extract_keyframes_optimized(
+    video_info: dict,
+    num_frames: int = NUM_KEYFRAMES,
+    thumb_dir: str | Path | None = None,
+) -> list[bytes]:
+    """
+    Extract evenly-spaced keyframes from a video using optimized single FFmpeg invocation.
+
+    Uses FFmpeg's select filter to extract all frames in one pass,
+    reducing subprocess overhead compared to multiple _extract_single_frame calls.
+
+    Args:
+        video_info: Video info dict with 'absolute_path', 'file_name', etc.
+        num_frames: Number of frames to extract
+        thumb_dir: Optional thumbnail directory
+
+    Returns:
+        List of JPEG bytes for each frame
+    """
+    source_path = video_info.get("lrf_path") or video_info["absolute_path"]
+
+    duration = get_video_duration(source_path)
+
+    if duration is None or duration < 0.5:
+        source_path = video_info["absolute_path"]
+        duration = get_video_duration(source_path)
+
+    if duration is None or duration < 0.5:
+        duration = _get_stream_duration(source_path)
+
+    if duration is None or duration < 0.5:
+        raise ValueError(f"Could not determine duration for {video_info['file_name']}")
+
+    # Build select filter for evenly-spaced frames
+    # select='not(mod(n,INTERVAL))' picks every INTERVALth frame
+    # We need to calculate interval based on duration and frame rate
+    # Instead, use select='isnan(prev_selected_t)+gte(t,timestamp)' for timestamp-based selection
+
+    timestamps = [duration * (i + 1) / (num_frames + 1) for i in range(num_frames)]
+
+    # Build select expression: pick first frame at or after each timestamp
+    # Using isequal(t,timestamp) won't work due to frame boundaries
+    # Better: use between() for a small window around each timestamp
+
+    # Create multiple outputs using split and select filters
+    # This is complex - simpler approach: use thumbnail filter with multiple outputs
+
+    # Actually, use a simpler approach: pipe all frames from select filter
+    # and parse them on the fly
+
+    # Use scene-based selection: pick the frame closest to each target timestamp
+    select_expr = "+".join([f"isnan(prev_selected_t)+gte(t,{ts:.3f})" for ts in timestamps])
+
+    cmd = [
+        "ffmpeg",
+        "-i", source_path,
+        "-vf", f"select='{select_expr}',scale=720:-2",
+        "-vsync", "vfr",
+        "-q:v", "3",
+        "-f", "image2pipe",
+        "-vcodec", "mjpeg",
+        "-loglevel", "error",
+        "pipe:1",
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, timeout=60)
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode(errors="replace").strip()
+        # Fallback to original method on failure
+        raise RuntimeError(f"Optimized FFmpeg failed: {stderr[:200]}")
+
+    # Parse the output - image2pipe produces concatenated JPEGs
+    # Each JPEG starts with \xff\xd8 and ends with \xff\xd9
+    frames = _parse_mjpeg_stream(result.stdout)
+
+    if len(frames) < num_frames:
+        # Not enough frames extracted, fallback to original method
+        raise RuntimeError(f"Only extracted {len(frames)}/{num_frames} frames")
+
+    # Save thumbnail (first frame)
+    if thumb_dir and frames:
+        _save_thumbnail(frames[0], video_info["file_hash"], thumb_dir)
+        thumb_path = str(Path(thumb_dir) / f"{video_info['file_hash']}.jpg")
+        video_info["thumbnail_path"] = thumb_path
+
+    return frames[:num_frames]
+
+
+def _parse_mjpeg_stream(data: bytes) -> list[bytes]:
+    """
+    Parse concatenated JPEG frames from image2pipe output.
+
+    Each JPEG starts with SOI marker (\xff\xd8) and ends with EOI marker (\xff\xd9).
+    """
+    frames = []
+    start = 0
+
+    # Find all JPEG start markers
+    while True:
+        # Find next SOI marker
+        soi = data.find(b"\xff\xd8", start)
+        if soi == -1:
+            break
+
+        # Find corresponding EOI marker
+        eoi = data.find(b"\xff\xd9", soi + 2)
+        if eoi == -1:
+            break
+
+        # Extract frame (including both markers)
+        frame = data[soi : eoi + 2]
+        if len(frame) > 100:  # Sanity check - must be a real JPEG
+            frames.append(frame)
+
+        start = eoi + 2
+
+    return frames
+
 
 def _extract_single_frame(source_path: str, timestamp: float) -> bytes | None:
     """

@@ -2027,3 +2027,234 @@ No voiceover script provided.
                 zf.writestr("manifest.json", json.dumps(manifest, indent=2))
 
         return manifest
+
+    # ------------------------------------------------------------------
+    # Batch operations for optimized processing
+    # ------------------------------------------------------------------
+
+    def insert_videos_batch(
+        self,
+        videos: list[dict[str, Any]],
+        embeddings: list[list[float] | None] | None = None
+    ) -> list[int | None]:
+        """
+        Insert multiple videos in a single transaction using executemany.
+        More efficient than individual inserts for bulk operations.
+
+        Args:
+            videos: List of video info dicts (same format as insert_video)
+            embeddings: Optional list of embeddings matching videos list length
+
+        Returns:
+            List of inserted video IDs (or None for failed inserts)
+        """
+        if not videos:
+            return []
+
+        conn = self.connect()
+
+        # Prepare data for executemany
+        params_list = []
+        for video in videos:
+            tags = video.get("tags")
+            if isinstance(tags, list):
+                tags = json.dumps(tags)
+
+            params_list.append({
+                "file_path": video["relative_path"],
+                "file_name": video["file_name"],
+                "file_size": video.get("file_size"),
+                "file_hash": video["file_hash"],
+                "source_device": video.get("source_device"),
+                "lrf_path": video.get("lrf_path"),
+                "duration_seconds": video.get("duration_seconds"),
+                "resolution": video.get("resolution"),
+                "width": video.get("width"),
+                "height": video.get("height"),
+                "fps": video.get("fps"),
+                "codec": video.get("codec"),
+                "creation_date": video.get("creation_date"),
+                "gps_latitude": video.get("gps_latitude"),
+                "gps_longitude": video.get("gps_longitude"),
+                "gps_location_name": video.get("gps_location_name"),
+                "folder_location": video.get("folder_location"),
+                "gps_accuracy": video.get("gps_accuracy"),
+                "location_source": video.get("location_source", "folder"),
+                "scene_description": video.get("scene_description"),
+                "tags": tags,
+                "mood": video.get("mood"),
+                "camera_movement": video.get("camera_movement"),
+                "time_of_day": video.get("time_of_day"),
+                "thumbnail_path": video.get("thumbnail_path"),
+                "proxy_path": video.get("proxy_path"),
+                "transcript": video.get("transcript"),
+                "transcript_model": video.get("transcript_model"),
+                "processed_at": video.get(
+                    "processed_at",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            })
+
+        # Use executemany for bulk insert
+        cursor = conn.executemany(
+            """
+            INSERT INTO videos (
+                file_path, file_name, file_size, file_hash, source_device, lrf_path,
+                duration_seconds, resolution, width, height, fps, codec, creation_date,
+                gps_latitude, gps_longitude, gps_location_name, folder_location,
+                gps_accuracy, location_source,
+                scene_description, tags, mood, camera_movement, time_of_day,
+                thumbnail_path, proxy_path, transcript, transcript_model, processed_at
+            ) VALUES (
+                :file_path, :file_name, :file_size, :file_hash, :source_device, :lrf_path,
+                :duration_seconds, :resolution, :width, :height, :fps, :codec, :creation_date,
+                :gps_latitude, :gps_longitude, :gps_location_name, :folder_location,
+                :gps_accuracy, :location_source,
+                :scene_description, :tags, :mood, :camera_movement, :time_of_day,
+                :thumbnail_path, :proxy_path, :transcript, :transcript_model, :processed_at
+            )
+            """,
+            params_list,
+        )
+
+        # Get the range of inserted IDs
+        # executemany doesn't give us individual IDs directly, so we query for them
+        first_id = cursor.lastrowid
+        video_ids = list(range(first_id - len(videos) + 1, first_id + 1))
+
+        # Insert embeddings if provided
+        if embeddings:
+            embedding_params = [
+                (vid, struct.pack(f"{len(emb)}f", *emb))
+                for vid, emb in zip(video_ids, embeddings)
+                if emb is not None
+            ]
+            if embedding_params:
+                conn.executemany(
+                    "INSERT INTO videos_vec (video_id, description_embedding) VALUES (?, ?)",
+                    embedding_params,
+                )
+
+        conn.commit()
+        return video_ids
+
+    # ------------------------------------------------------------------
+    # Transcription operations
+    # ------------------------------------------------------------------
+
+    def get_videos_missing_transcript(
+        self,
+        limit: int | None = None,
+        include_errors: bool = False
+    ) -> list[dict[str, Any]]:
+        """
+        Get videos that don't have transcripts yet.
+
+        Args:
+            limit: Maximum number of videos to return (None for all)
+            include_errors: If True, include videos where transcript field is NULL
+                           but don't filter out error messages
+
+        Returns:
+            List of video dicts missing transcripts
+        """
+        conn = self.connect()
+
+        sql = "SELECT * FROM videos WHERE transcript IS NULL"
+
+        if not include_errors:
+            # Also exclude videos with processing errors
+            sql += " AND (scene_description IS NULL OR scene_description NOT LIKE 'ERROR%')"
+
+        sql += " ORDER BY id"
+
+        if limit:
+            sql += f" LIMIT {limit}"
+
+        rows = conn.execute(sql).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_video_transcript(
+        self,
+        video_id: int,
+        transcript: str,
+        model: str | None = None
+    ) -> bool:
+        """
+        Update a video's transcript and re-index for search.
+
+        Args:
+            video_id: The video ID to update
+            transcript: The transcript text
+            model: The whisper model used (e.g., "small", "base", "tiny")
+
+        Returns:
+            True if update successful, False otherwise
+        """
+        conn = self.connect()
+        try:
+            conn.execute(
+                """
+                UPDATE videos
+                SET transcript = ?, transcript_model = ?
+                WHERE id = ?
+                """,
+                (transcript, model, video_id),
+            )
+            conn.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error updating transcript for video {video_id}: {e}")
+            return False
+
+    def get_videos_with_transcript(self, limit: int = 100) -> list[dict[str, Any]]:
+        """
+        Get videos that have transcripts.
+
+        Args:
+            limit: Maximum number of videos to return
+
+        Returns:
+            List of video dicts with transcripts
+        """
+        conn = self.connect()
+        rows = conn.execute(
+            """
+            SELECT * FROM videos
+            WHERE transcript IS NOT NULL
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def batch_update_transcripts(
+        self,
+        updates: list[tuple[int, str, str | None]]
+    ) -> int:
+        """
+        Update multiple video transcripts in a single transaction.
+
+        Args:
+            updates: List of (video_id, transcript, model) tuples
+
+        Returns:
+            Number of successfully updated records
+        """
+        if not updates:
+            return 0
+
+        conn = self.connect()
+        params = [(t, m, vid) for vid, t, m in updates]
+
+        cursor = conn.executemany(
+            """
+            UPDATE videos
+            SET transcript = ?, transcript_model = ?
+            WHERE id = ?
+            """,
+            params,
+        )
+        conn.commit()
+        return cursor.rowcount
